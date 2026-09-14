@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig, type Config } from "./config.js";
 import { ceilingHit, createLimits, parseCeiling, type RunLimits } from "./limits.js";
 import { createLogger } from "./logger.js";
-import type { openDraftPr } from "./pr.js";
+import type { openDraftPrs } from "./pr.js";
 import { reportLines, sweepAll, writeReport, type SweepAllArgs } from "./sweep.js";
 import type { Candidate, RunSummary } from "./types.js";
 
@@ -63,7 +63,7 @@ function args(config: Config, over: Partial<SweepAllArgs> = {}): SweepAllArgs {
     pr: false,
     limits: createLimits({}),
     runOne: vi.fn(async (a) => summaryFor(a.repo.name, 1)) as unknown as SweepAllArgs["runOne"],
-    openPr: vi.fn(async () => "https://github.com/example/repo/pull/1") as unknown as typeof openDraftPr,
+    openPr: vi.fn(async () => ["https://github.com/example/repo/pull/1"]) as unknown as typeof openDraftPrs,
     dirty: vi.fn(async () => []),
     ...over,
   };
@@ -120,8 +120,20 @@ describe("sweepAll", () => {
     const report = await sweepAll(a);
     expect(report.repos[0]?.prUrl).toBe("https://github.com/example/repo/pull/1");
     expect(a.openPr).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(a.openPr!).mock.calls[0]?.[0]).toMatchObject({ files: ["src/a0.test.ts"] });
+    expect(vi.mocked(a.openPr!).mock.calls[0]?.[0]).toMatchObject({ files: ["src/a0.test.ts"], maxLines: 600 });
+    expect(report.repos[0]?.prUrls).toEqual(["https://github.com/example/repo/pull/1"]);
     expect(reportLines(report)).toContain("https://github.com/example/repo/pull/1");
+  });
+
+  it("records every part PR when one repo's output was split", async () => {
+    const config = await workspace();
+    const urls = ["https://example.test/pr/1", "https://example.test/pr/2"];
+    const openPr = vi.fn(async () => urls) as unknown as typeof openDraftPrs;
+    const a = args(config, { pr: true, prMaxLines: 200, openPr });
+    const report = await sweepAll(a);
+    expect(vi.mocked(a.openPr!).mock.calls[0]?.[0]).toMatchObject({ maxLines: 200 });
+    expect(report.repos[0]).toMatchObject({ prUrl: urls[0], prUrls: urls });
+    expect(reportLines(report)).toContain(`${urls[0]}, ${urls[1]}`);
   });
 
   it("refuses to touch a dirty checkout and never runs it", async () => {

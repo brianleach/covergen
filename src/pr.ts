@@ -13,9 +13,10 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { countLines, packSpecFiles, partBody, partTitle, type SpecFile } from "./chunk.js";
 import type { GitExecResult } from "./git.js";
 import type { RepoConfig } from "./types.js";
 
@@ -135,4 +136,92 @@ export async function openDraftPr(args: OpenDraftPrArgs): Promise<string> {
     if (startedOn && startedOn !== "HEAD") await exec("git", ["checkout", startedOn], root);
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Line counts for the spec files a run wrote, read from the checkout before any
+ * of them is committed: once a part is committed and the checkout goes back to
+ * the branch it started on, that part's files hold their default-branch content
+ * again. A file that cannot be read counts as empty rather than failing the run.
+ */
+export async function specSizes(repo: RepoConfig, files: string[]): Promise<SpecFile[]> {
+  return Promise.all(
+    files.map(async (path) => {
+      const text = await readFile(resolve(repo.cwd, path), "utf8").catch(() => "");
+      return { path, lines: countLines(text) };
+    }),
+  );
+}
+
+export interface UpdatePrBodyArgs {
+  repo: RepoConfig;
+  url: string;
+  body: string;
+  exec?: CmdExec;
+}
+
+/** Replace an open PR's body. Used to give the earlier parts their sibling links. */
+export async function updatePrBody(args: UpdatePrBodyArgs): Promise<void> {
+  const exec = args.exec ?? runCmd;
+  const scratch = await mkdtemp(join(tmpdir(), "covergen-pr-"));
+  const bodyFile = join(scratch, "body.md");
+  try {
+    await writeFile(bodyFile, args.body, "utf8");
+    await must(exec, "gh", ["pr", "edit", args.url, "--body-file", bodyFile], args.repo.root);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+export interface OpenDraftPrsArgs extends Omit<OpenDraftPrArgs, "suffix"> {
+  /** sweep.pr_max_lines. 0 opens one PR however large the run was. */
+  maxLines: number;
+  /** Sizes of `files`, read from the checkout when absent. */
+  sizes?: SpecFile[];
+  /** Fixed random suffixes, one per part, for tests. */
+  suffixes?: string[];
+}
+
+/**
+ * Open the draft PRs for one repo's accepted specs: one when the run fits under
+ * `maxLines`, otherwise one per packed part, each cut from the default branch so
+ * it is mergeable on its own. Returns the PR URLs in part order.
+ *
+ * The parts are opened in order, so a part can only link the ones already open.
+ * A second pass edits every part but the last, which gives each body the full
+ * sibling list once all the URLs exist.
+ */
+export async function openDraftPrs(args: OpenDraftPrsArgs): Promise<string[]> {
+  const { repo, files, title, body } = args;
+  const exec = args.exec ?? runCmd;
+  if (files.length === 0) throw new Error(`nothing to commit for ${repo.name}`);
+  const sizes = args.sizes ?? (await specSizes(repo, files));
+  const parts = packSpecFiles(sizes, args.maxLines);
+  if (parts.length <= 1) {
+    return [await openDraftPr({ repo, files, title, body, exec, now: args.now, suffix: args.suffixes?.[0] })];
+  }
+
+  const urls: (string | undefined)[] = parts.map(() => undefined);
+  const infoFor = (index: number): Parameters<typeof partBody>[1] => ({
+    index: index + 1,
+    total: parts.length,
+    files: parts[index] ?? [],
+    siblings: urls,
+  });
+  for (let i = 0; i < parts.length; i += 1) {
+    urls[i] = await openDraftPr({
+      repo,
+      files: (parts[i] ?? []).map((f) => f.path),
+      title: partTitle(title, i + 1, parts.length),
+      body: partBody(body, infoFor(i)),
+      exec,
+      now: args.now,
+      suffix: args.suffixes?.[i],
+    });
+  }
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const url = urls[i];
+    if (url) await updatePrBody({ repo, url, body: partBody(body, infoFor(i)), exec });
+  }
+  return urls.filter((url): url is string => Boolean(url));
 }

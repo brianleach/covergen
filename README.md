@@ -103,6 +103,7 @@ covergen baseline  --repo <name> [--top <n>]
 | `--changed-since <ref>` | Only files changed since this git ref, filtered by the repo's `sources` globs |
 | `--limit <n>` | Maximum source files to target, per repo. Default 10 |
 | `--order <mode>` | Target order before `--limit`: `value` (default, branch-weighted), `gap` (most uncovered lines first) or `glob` |
+| `--pr-max-lines <n>` | Lines of accepted spec one draft PR may hold, overriding `sweep.pr_max_lines`. A larger run opens several PRs. `0` opens one |
 | `--max-tokens <n>` | Run-wide token ceiling, overriding `sweep.max_tokens_per_run` |
 | `--max-minutes <n>` | Run-wide wall-clock ceiling, overriding `sweep.max_minutes` |
 | `--report <path>` | Write a JSON report of the run to this path |
@@ -161,6 +162,8 @@ falls back to the pack of the same name bundled with covergen.
 | `mutation.timeout_ms` | `300000` | Per-mutant run timeout |
 | `sweep.max_tokens_per_run` | `0` | Tokens one run may spend across every repo in it. `0` disables |
 | `sweep.max_minutes` | `300` | Wall-clock minutes before a run stops starting new work. `0` disables |
+| `sweep.pr_max_lines` | `600` | Lines of accepted spec one draft PR may hold. A larger run is split into part PRs. `0` opens one PR however large |
+| `sweep.pr_max_lines_per_file` | `500` | Lines one spec file may reach before the run stops adding segments to it and leaves the rest for the next run. `0` disables |
 | `segments.max_lines` | `50` | Largest uncovered chunk sent as one candidate (CoverUp's cap) |
 | `segments.max_per_file` | `8` | Most segments taken from one source file |
 | `state_dir` | `.covergen` | Directory inside each target repo for state and scratch |
@@ -657,6 +660,32 @@ Two refusals are deliberate:
 
 `gh` must be on PATH and authenticated for the target remote. `--pr` also works
 with `--repo <name>` for one repo.
+
+### Splitting a big night into part PRs
+
+A PR nobody can review is a PR nobody merges, so the size of the review, not the
+size of the run, decides how many PRs a repo gets. When a repo's accepted spec
+files add up to more than `sweep.pr_max_lines` (600 by default,
+`--pr-max-lines <n>` to override), covergen packs them greedily in accepted order
+and opens one draft PR per group, titled `... (part k of n)`.
+
+Every part is branched from the default branch on its own. They are not stacked:
+any part can merge alone, and the parts can merge in any order. Each body lists
+its own spec files with their line counts and links the other parts, and the
+report records every URL under `repos[].prUrls`.
+
+A file larger than the whole budget gets a part to itself rather than being
+split, because a spec file is only reviewable whole. `sweep.pr_max_lines_per_file`
+(500) is what keeps that rare: once a spec reaches it the run stops adding
+segments to that file and leaves the rest for the next run.
+`segments.max_per_file` bounds how many candidates a source file gets, not how
+many lines they add, so the two ceilings do different jobs.
+
+Pick `--limit` by the number of PRs you are willing to read, not the number of
+files. A logic-only sweep accepts roughly one test per 90 lines of spec, so about
+six or seven accepted tests fill one 600-line PR. `--limit 5` is usually one PR,
+`--limit 10` is one or two, and `--limit 25` is a morning of reviewing. The
+nightly examples below use `--limit 5` for that reason.
 
 ### The run report
 

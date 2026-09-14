@@ -302,6 +302,21 @@ describe("runPipeline", () => {
     expect((h.applyAccepted.mock.calls[0] as unknown[])?.[1]).toHaveLength(1);
   });
 
+  it("leaves a spec that has reached the per-file ceiling for the next run", async () => {
+    const repo = await fixtureRepo();
+    await mkdir(join(repo.cwd, "spec/services"), { recursive: true });
+    await writeFile(join(repo.cwd, SPEC), "# line\n".repeat(60), "utf8");
+    const cfg = { sweep: { max_tokens_per_run: 0, max_minutes: 0, pr_max_lines: 600, pr_max_lines_per_file: 50 } };
+
+    const summary = await run(repo, { cfg: cfg as Partial<Config> });
+    expect(h.buildSegments).not.toHaveBeenCalled();
+    expect(summary.candidates).toHaveLength(0);
+    // The same spec is generated for again once the ceiling is lifted.
+    h.generate.mockResolvedValue(candidate({ wholeFile: false }));
+    const next = await run(repo, { cfg: { ...cfg, sweep: { ...cfg.sweep, pr_max_lines_per_file: 0 } } as Partial<Config> });
+    expect(next.candidates).toHaveLength(1);
+  });
+
   it("passes the mutation settings to the gate and carries the tally onto the candidate", async () => {
     const repo = await fixtureRepo();
     const mutation = { tried: 3, killed: 2, survivors: [{ id: "m2-boolean", line: 2, description: "boolean: true to false" }] };

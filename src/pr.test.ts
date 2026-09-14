@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assertBranch, branchName, defaultBranch, dirtyPaths, openDraftPr, runCmd } from "./pr.js";
+import { assertBranch, branchName, defaultBranch, dirtyPaths, openDraftPr, openDraftPrs, runCmd } from "./pr.js";
 import type { RepoConfig } from "./types.js";
 
 const originalPath = process.env.PATH;
@@ -18,7 +18,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 }
 
 /** A work tree with one commit, a bare remote called origin, and origin/HEAD set. */
-async function fixture(): Promise<{ tmp: string; work: string; ghLog: string }> {
+async function fixture(): Promise<{ tmp: string; work: string; ghLog: string; bodyLog: string }> {
   const tmp = await mkdtemp(join(tmpdir(), "covergen-pr-test-"));
   const remote = join(tmp, "remote.git");
   const work = join(tmp, "work");
@@ -34,18 +34,34 @@ async function fixture(): Promise<{ tmp: string; work: string; ghLog: string }> 
   await git(work, "push", "origin", "main");
   await git(work, "remote", "set-head", "origin", "-a");
 
-  // A fake gh on PATH: the real one would need a network and a login.
+  // A fake gh on PATH: the real one would need a network and a login. It logs
+  // its arguments, keeps a copy of every body file it was handed, and numbers
+  // the PRs it creates so a multi-part run gets distinct URLs.
   const bin = join(tmp, "bin");
   const ghLog = join(tmp, "gh-args.txt");
+  const bodyLog = join(tmp, "gh-bodies.md");
+  const countFile = join(tmp, "gh-count.txt");
   await mkdir(bin, { recursive: true });
   await writeFile(
     join(bin, "gh"),
-    `#!/bin/sh\nfor arg in "$@"; do echo "$arg" >> ${JSON.stringify(ghLog)}; done\necho https://github.com/example/repo/pull/42\n`,
+    [
+      "#!/bin/sh",
+      `for arg in "$@"; do echo "$arg" >> ${JSON.stringify(ghLog)}; done`,
+      'prev=""',
+      `for arg in "$@"; do if [ "$prev" = "--body-file" ]; then cat "$arg" >> ${JSON.stringify(bodyLog)}; fi; prev="$arg"; done`,
+      'if [ "$2" = "create" ]; then',
+      `  n=$(cat ${JSON.stringify(countFile)} 2>/dev/null || echo 0)`,
+      "  n=$((n + 1))",
+      `  echo "$n" > ${JSON.stringify(countFile)}`,
+      '  echo "https://github.com/example/repo/pull/$n"',
+      "fi",
+      "",
+    ].join("\n"),
     "utf8",
   );
   await chmod(join(bin, "gh"), 0o755);
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
-  return { tmp, work, ghLog };
+  return { tmp, work, ghLog, bodyLog };
 }
 
 function repoAt(root: string): RepoConfig {
@@ -101,7 +117,7 @@ describe("openDraftPr", () => {
       suffix: "abc123",
     });
 
-    expect(url).toBe("https://github.com/example/repo/pull/42");
+    expect(url).toBe("https://github.com/example/repo/pull/1");
     const branch = "covergen/20260909-abc123";
     expect(await git(work, "ls-remote", "--heads", "origin")).toContain(`refs/heads/${branch}`);
     const committed = await git(work, "show", "--name-only", "--format=", `origin/${branch}`);
@@ -119,6 +135,69 @@ describe("openDraftPr", () => {
     await expect(openDraftPr({ repo: repoAt(work), files: [], title: "t", body: "b" })).rejects.toThrow(
       /nothing to commit/,
     );
+  });
+});
+
+describe("openDraftPrs", () => {
+  it("opens one PR when the accepted specs fit under the ceiling", async () => {
+    const { work } = await fixture();
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const urls = await openDraftPrs({
+      repo: repoAt(work),
+      files: ["src/a.test.ts"],
+      title: "covergen: 1 test accepted in fixture",
+      body: "# body\n",
+      maxLines: 600,
+      now: new Date(2026, 8, 9),
+      suffixes: ["abc123"],
+    });
+    expect(urls).toEqual(["https://github.com/example/repo/pull/1"]);
+    const committed = await git(work, "show", "--name-only", "--format=", "origin/covergen/20260909-abc123");
+    expect(committed.trim()).toBe("src/a.test.ts");
+  });
+
+  it("splits an oversized run into independent part PRs that link each other", async () => {
+    const { work, bodyLog } = await fixture();
+    for (const name of ["a", "b", "c"]) await writeFile(join(work, "src", `${name}.test.ts`), "// generated\n", "utf8");
+
+    const urls = await openDraftPrs({
+      repo: repoAt(work),
+      files: ["src/a.test.ts", "src/b.test.ts", "src/c.test.ts"],
+      title: "covergen: 3 tests accepted in fixture",
+      body: "# body\n",
+      maxLines: 600,
+      // 400 + 400 does not fit, 400 + 100 does, so the parts are [a] and [b, c].
+      sizes: [
+        { path: "src/a.test.ts", lines: 400 },
+        { path: "src/b.test.ts", lines: 400 },
+        { path: "src/c.test.ts", lines: 100 },
+      ],
+      now: new Date(2026, 8, 9),
+      suffixes: ["p1", "p2"],
+    });
+
+    expect(urls).toEqual(["https://github.com/example/repo/pull/1", "https://github.com/example/repo/pull/2"]);
+    // Each part carries only its own files, and each is branched from the
+    // default branch rather than from the part before it, so either can merge
+    // alone and in either order.
+    const first = await git(work, "show", "--name-only", "--format=", "origin/covergen/20260909-p1");
+    const second = await git(work, "show", "--name-only", "--format=", "origin/covergen/20260909-p2");
+    expect(first.trim().split("\n")).toEqual(["src/a.test.ts"]);
+    expect(second.trim().split("\n")).toEqual(["src/b.test.ts", "src/c.test.ts"]);
+    for (const branch of ["p1", "p2"]) {
+      const parent = await git(work, "rev-parse", `origin/covergen/20260909-${branch}^`);
+      expect(parent.trim()).toBe((await git(work, "rev-parse", "origin/main")).trim());
+    }
+    // The message each part committed names its own part and its own files.
+    expect(await git(work, "log", "-1", "--format=%B", "origin/covergen/20260909-p1")).toContain("(part 1 of 2)");
+    expect(await git(work, "log", "-1", "--format=%B", "origin/covergen/20260909-p2")).toContain("`src/c.test.ts` (100 lines)");
+
+    // Part 1 was opened before part 2 existed, so the edit pass is what gives it
+    // the sibling link.
+    const bodies = await readFile(bodyLog, "utf8");
+    expect(bodies).toContain("- part 2: not opened yet");
+    expect(bodies).toContain("- part 2: https://github.com/example/repo/pull/2");
+    expect(bodies).toContain("- part 1: https://github.com/example/repo/pull/1");
   });
 });
 

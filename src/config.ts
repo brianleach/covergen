@@ -187,6 +187,17 @@ const ConfigSchema = z.object({
       max_tokens_per_run: z.number().int().min(0).default(0),
       /** Wall-clock minutes before the run stops starting new work. 0 disables it. */
       max_minutes: z.number().int().min(0).default(300),
+      /**
+       * Lines of accepted spec one draft PR may hold. A run over this opens
+       * several PRs instead, each mergeable on its own. 0 opens one PR however
+       * large the run was.
+       */
+      pr_max_lines: z.number().int().min(0).default(600),
+      /**
+       * Lines one spec file may reach before the run stops adding segments to
+       * it and leaves the rest for the next run. 0 disables the ceiling.
+       */
+      pr_max_lines_per_file: z.number().int().min(0).default(500),
     })
     .default({}),
   segments: z
