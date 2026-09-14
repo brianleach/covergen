@@ -45,6 +45,26 @@ them generic: a pack describes an ecosystem's conventions, not one codebase. Rea
 length. Every rule should be one a generated test can actually be judged against:
 shape, mocking, what to assert, what not to do.
 
+## Leak check
+
+This repository is public. `scripts/leak-check.sh` greps the tracked files, the
+commit messages a branch adds, and a pull request's title and body against a
+list of names that must not appear here, and fails on any hit. The list is a
+regex the maintainers keep outside the repository, in `$LEAK_PATTERNS` or in
+`$LEAK_PATTERNS_FILE` (default `$HOME/.config/covergen/leak-patterns`), so the
+repository never carries it. CI reads it from a repository secret.
+
+Nothing is required of you as an outside contributor: a fork has no secret, so
+the check finds no pattern, prints that it is skipping, and passes. Maintainers
+install the pre-push hook once:
+
+```bash
+npm run hooks:install   # git config core.hooksPath .githooks
+```
+
+The hook then runs the check against `origin/main` before every push. Run it by
+hand at any time with `npm run leak-check`.
+
 ## Pull requests
 
 - One reviewable change per pull request. Split anything larger.

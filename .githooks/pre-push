@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs the leak check over the working tree and over the commit messages this
+# push would add, so a private name is caught before it reaches a public remote.
+# Install with: npm run hooks:install
+#
+# Skip a single push with: LEAK_SKIP=1 git push
+set -uo pipefail
+
+if [ -n "${LEAK_SKIP:-}" ]; then
+  echo "pre-push: LEAK_SKIP set, skipping the leak check"
+  exit 0
+fi
+
+here="$(cd "$(dirname "$0")/.." && pwd)"
+LEAK_BASE="${LEAK_BASE:-origin/main}" "$here/scripts/leak-check.sh"

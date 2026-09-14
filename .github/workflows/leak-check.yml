@@ -1,0 +1,40 @@
+name: leak-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak-check:
+    name: leak-check
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth 0 so the base..HEAD commit message range resolves.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The pattern list is a repository secret, so it never lives in the tree.
+      # A fork cannot read it: LEAK_PATTERNS arrives empty there and the script
+      # takes its skip path and passes, which is intended.
+      #
+      # The pull request title and body reach the script through the
+      # environment, never interpolated into the shell command, so a title
+      # containing shell metacharacters cannot run anything.
+      - name: Run the leak check
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+          LEAK_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          LEAK_TEXT="$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY")" \
+            scripts/leak-check.sh

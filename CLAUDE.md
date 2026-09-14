@@ -61,6 +61,7 @@ cli: covergen run --repo X --file path   |   covergen sweep --repo X --changed-s
 - Repaired candidates pass the same rules registry as initial candidates. Final combined spec files pass k times and validate before the run succeeds.
 - Runners shell out with `execFile` (no shell string interpolation), honor `commandPrefix`, and always write lcov to a path they return.
 - No em dashes in any written output.
+- This repo is public. Never reference other repositories, companies, or products by name in code, docs, examples, tests, commit messages, or PR text. `scripts/leak-check.sh` enforces a private list; run it before pushing.
 
 ## Commands
 

@@ -38,6 +38,8 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "leak-check": "scripts/leak-check.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
