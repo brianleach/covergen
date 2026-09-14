@@ -1,0 +1,72 @@
+# Copy to covergen.yaml (gitignored) and edit paths.
+# The repo names below are placeholders: one entry per stack covergen supports,
+# each pointing at a sibling checkout. Rename them to your own repos.
+# To try covergen without wiring up another repo at all, use
+# covergen.covergen.example.yaml, which points covergen at its own source tree.
+generator: claude-code # the default: a Claude subscription. api = the metered key, the backup
+claude_code:           # only read when the generator is claude-code
+  concurrency: 1       # in-flight candidates; headless runs share one usage window
+  max_tokens_per_sweep: 2000000   # the runaway guard, since there is no dollar meter
+anthropic:
+  api_key_env: ANTHROPIC_API_KEY
+  generator_model: claude-opus-5
+  repair_model: claude-sonnet-5   # ignored by the claude-code generator
+gate:
+  k: 3                 # consecutive passing runs required (pass^k)
+  timeout_ms: 300000
+  baseline_timeout_ms: 1800000   # whole-suite baseline, 30 min
+  max_repair_rounds: 3
+mutation:
+  enabled: true        # spot-check accepted tests by breaking the lines they cover
+  max_mutants: 5       # mutants per candidate, bounded so the gate stays cheap
+  min_killed: 1        # a candidate that kills fewer than this is rejected as weak_assertions
+  timeout_ms: 300000
+segments:
+  max_lines: 50        # CoverUp's cap
+  max_per_file: 8
+repos:
+  # A Rails API.
+  - name: rails-api
+    root: ../rails-api
+    runner: rspec
+    sources: ["app/services/**/*.rb", "app/models/**/*.rb", "lib/**/*.rb"]
+    idiom_pack: ./idioms/rspec.md
+    # Example: the repo pins an older ruby than the system one, so rbenv exec
+    # picks the pinned version.
+    command_prefix: ["rbenv", "exec"]
+    # Gate on the same lint config CI uses.
+    validate: [["bundle", "exec", "rubocop", "spec"]]
+    # command_prefix: ["docker", "compose", "exec", "-T", "api"]   # alternative when the suite runs in a container
+  # A Rails monolith.
+  - name: rails-monolith
+    root: ../rails-monolith
+    runner: rspec
+    sources: ["app/services/**/*.rb", "app/models/**/*.rb"]
+    idiom_pack: ./idioms/rspec.md
+    command_prefix: ["rbenv", "exec"]
+  # A Next.js app whose web package lives in a workspace.
+  - name: next-app
+    root: ../next-app
+    cwd: apps/web
+    runner: vitest
+    sources: ["src/**/*.ts", "src/**/*.tsx"]
+    idiom_pack: ./idioms/vitest-nextjs.md
+  # A plain Node service on Vitest, no DOM, so no idiom pack applies.
+  - name: node-api
+    root: ../node-api
+    cwd: apps/api
+    runner: vitest
+    sources: ["src/**/*.ts"]
+  # A React app tested with bun test.
+  - name: react-app
+    root: ../react-app
+    runner: bun
+    sources: ["src/**/*.ts", "src/**/*.tsx"]
+    idiom_pack: ./idioms/bun.md
+    validate: [["bun", "run", "type-check"], ["bunx", "eslint", "--max-warnings=0", "src/__tests__"]]
+  # A React Native app on Expo, tested with jest-expo.
+  - name: mobile-app
+    root: ../mobile-app
+    runner: jest
+    sources: ["src/**/*.ts", "src/**/*.tsx"]
+    idiom_pack: ./idioms/jest-expo.md

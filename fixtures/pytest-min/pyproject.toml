@@ -1,0 +1,5 @@
+# pythonpath keeps the package importable with no install step, so the fixture
+# needs only pytest and pytest-cov on the interpreter covergen is pointed at.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

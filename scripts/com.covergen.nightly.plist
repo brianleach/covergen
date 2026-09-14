@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd job for the nightly sweep. Install:
+       cp scripts/com.covergen.nightly.plist ~/Library/LaunchAgents/
+       edit the two paths below, then: launchctl load ~/Library/LaunchAgents/com.covergen.nightly.plist
+     Runs at 02:30 local time. Remove with launchctl unload. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.covergen.nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd /Users/CHANGE_ME/code/covergen && scripts/nightly-sweep.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>/Users/CHANGE_ME/code/covergen/.covergen/logs/launchd.out</string>
+  <key>StandardErrorPath</key><string>/Users/CHANGE_ME/code/covergen/.covergen/logs/launchd.err</string>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

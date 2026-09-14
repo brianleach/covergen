@@ -1,0 +1,11 @@
+# Its own workspace root, so the crate never gets absorbed into one above it.
+[workspace]
+
+[package]
+name = "rust-min"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"

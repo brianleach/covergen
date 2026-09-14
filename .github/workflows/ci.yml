@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # typecheck, test and build are the same three gates the prepublishOnly
+      # guard in package.json runs before a publish. They are listed here as
+      # separate steps so a failure names itself in the job log.
+      - run: npm run typecheck
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+
+      # llvm-tools-preview is what cargo-llvm-cov needs for llvm-cov and
+      # llvm-profdata. A toolchain without it fails only at the smoke run, not at
+      # `cargo llvm-cov --version`.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      # The pytest fixture declares these in its pyproject, but nothing installs
+      # from it here: the fixture runs against whatever `python3 -m pytest`
+      # resolves to, so CI installs them explicitly.
+      - run: pip install pytest pytest-cov
+
+      # The fixture tests self-skip when their toolchain is absent. Installing
+      # Bun, Python, Go and the Rust coverage driver above unskips the bun-lib,
+      # pytest-min, go-min and rust-min fixture tests in src/fixtures.test.ts, so
+      # only the rspec fixture skips on this runner now.
+      # No Ruby setup step by design.
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Check the built bin keeps its shebang
+        run: |
+          head -n 1 dist/cli.js
+          head -n 1 dist/cli.js | grep -qx '#!/usr/bin/env node'
+
+      - name: List the packed files
+        run: npm pack --dry-run
+
+      - name: Install the packed tarball and run the bin
+        run: |
+          tarball=$(npm pack | tail -n 1)
+          npm install -g "./$tarball"
+          covergen --help

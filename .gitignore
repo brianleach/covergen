@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+.covergen/
+# Local config may reference repo paths and keys; keep only the example in git.
+covergen.yaml
+# npm pack output from local publish rehearsals.
+*.tgz
+__pycache__/
+.coverage
+fixtures/rust-min/target/
+fixtures/rust-min/Cargo.lock

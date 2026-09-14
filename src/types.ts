@@ -1,0 +1,314 @@
+/**
+ * Canonical shapes shared by every stage. Keep this file dependency-free.
+ * All paths are absolute unless a field name says otherwise.
+ */
+
+export type RunnerName = "rspec" | "vitest" | "bun" | "jest" | "pytest" | "go" | "cargo";
+
+/** The repo entry's `pytest:` block. `package` absent means derive `--cov` from `sources`. */
+export interface PytestOptions {
+  /** argv that invokes pytest, e.g. ["python","-m","pytest"] or ["uv","run","pytest"]. */
+  command: string[];
+  package?: string;
+  /** Glob for test files, cwd-relative. Preflight fails when nothing matches. */
+  testGlob: string;
+}
+
+/** The repo entry's `go:` block. Go selects tests by package, never by file. */
+export interface GoOptions {
+  /** argv that invokes the test command, e.g. ["go","test"]. */
+  command: string[];
+  /** Package patterns to test and to measure, e.g. ["./..."]. */
+  packages: string[];
+  /**
+   * -race. Off by default: the gate already runs every candidate k times, which
+   * is the flake check -race would be bought for, and it triples the run time.
+   */
+  race: boolean;
+  /** Build tags, passed as one -tags flag. */
+  buildTags?: string[];
+}
+
+/** The repo entry's `cargo:` block. Rust selects tests by crate, never by file. */
+export interface CargoOptions {
+  /** argv that invokes cargo-llvm-cov, e.g. ["cargo","llvm-cov"]. */
+  command: string[];
+  /**
+   * Crates to test and measure, each passed as `-p <crate>`. Empty means the
+   * whole workspace, which is what a single-crate repo wants. A list is how a
+   * large workspace keeps a failing test in an unswept crate out of its
+   * baseline.
+   */
+  packages: string[];
+  /** Extra arguments for the test harness, passed after `--`. */
+  testArgs: string[];
+}
+
+/** Which backend makes the model calls: the metered API, or a Claude subscription. */
+export type GeneratorBackend = "api" | "claude-code";
+
+/** One repo entry from covergen.yaml, resolved (paths absolute). */
+export interface RepoConfig {
+  name: string;
+  root: string;
+  runner: RunnerName;
+  /** Optional working directory inside root (e.g. apps/web for a monorepo). */
+  cwd: string;
+  /** Glob(s) for source files eligible for generation. */
+  sources: string[];
+  /**
+   * Glob(s) subtracted from `sources`. Narrower than rewriting `sources` and the
+   * only practical way to drop one extension: a package whose runner has no DOM
+   * environment excludes `**` + `/*.tsx` so component targets are never picked.
+   */
+  exclude?: string[];
+  /** Given a source path relative to cwd, the conventional spec path relative to cwd. */
+  specPath: (relSource: string) => string;
+  /** Idiom pack markdown, loaded verbatim into the stable prompt block. */
+  idiomPackPath?: string;
+  /** Overrides the top-level generator backend for this repo. */
+  generator?: GeneratorBackend;
+  /** false leaves the repo out of `sweep --all`. */
+  sweep?: boolean;
+  /** Extra hints (e.g. "run bundle exec rspec via docker compose exec api"). */
+  commandPrefix?: string[];
+  /**
+   * Commands run in cwd after a candidate passes the coverage gate, with the
+   * candidate still spliced in (typecheck, lint). Any nonzero exit rejects it as
+   * build_failed so the repair loop sees the error.
+   */
+  validate?: string[][];
+  /** Rule ids from src/rules.ts this repo turns off, e.g. ["behavioral-evidence"]. */
+  disableRules?: string[];
+  /**
+   * Accept a candidate the mutation spot-check could not judge, because no
+   * operator applied to any line it covered. Off by default: a test nothing can
+   * break is the thing the spot-check exists to catch. A repo of declaration-
+   * heavy files where that is the normal case turns it on.
+   */
+  allowNoMutants?: boolean;
+  /** Settings for the pytest runner. Ignored by every other runner. */
+  pytest?: PytestOptions;
+  /** Settings for the go runner. Ignored by every other runner. */
+  go?: GoOptions;
+  /** Settings for the cargo runner. Ignored by every other runner. */
+  cargo?: CargoOptions;
+}
+
+/** Line coverage for one file. Lines absent from the map were not instrumented. */
+export interface FileCoverage {
+  /** Path relative to the repo cwd, normalized with forward slashes. */
+  path: string;
+  /** line number -> hit count */
+  lines: Map<number, number>;
+}
+
+export type CoverageMap = Map<string, FileCoverage>;
+
+export interface CoverageDelta {
+  path: string;
+  /** Lines that were 0 hits before and >0 after. */
+  newlyCovered: number[];
+  /** Lines that were >0 before and 0 after (should be empty; a regression). */
+  lost: number[];
+  before: { covered: number; total: number };
+  after: { covered: number; total: number };
+}
+
+/** A contiguous chunk of uncovered source to target with one candidate. */
+export interface Segment {
+  path: string;
+  startLine: number;
+  endLine: number;
+  /** The exact uncovered line numbers inside [startLine, endLine]. */
+  uncoveredLines: number[];
+  /** Source text of the segment, with line numbers prefixed. */
+  text: string;
+  /** Best-effort enclosing symbol (def/function/class name) if detectable. */
+  symbol?: string;
+}
+
+export interface RunOptions {
+  /** Spec/test files to run, relative to cwd. Empty = whole suite. */
+  files: string[];
+  coverage: boolean;
+  timeoutMs: number;
+  env?: Record<string, string>;
+  /**
+   * Report every file matched by the repo's coverage config, not just the files the
+   * run loaded. Set by the two whole-project baselines, the `baseline` command and the
+   * pipeline's whole-suite baseline, because a source file with no test at all is never
+   * loaded and would otherwise be missing from the map rather than showing 0%. Per-file
+   * gate runs and fast-mode baselines leave it off so the delta stays cheap.
+   */
+  wholeProject?: boolean;
+}
+
+export interface RunResult {
+  ok: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  /** Absolute path to an lcov.info file when coverage was requested and produced. */
+  lcovPath?: string;
+}
+
+/** How much preflight is allowed to spend. */
+export interface PreflightOptions {
+  /**
+   * Run the checks that cost a build or a coverage pass as well as the cheap
+   * ones. Off by default, so `covergen preflight` stays a few seconds; the
+   * pipeline turns it on once per repo, while there is no baseline to prove the
+   * same thing.
+   */
+  deep?: boolean;
+}
+
+/** One runner adapter. Implementations live in src/runners/. */
+export interface Runner {
+  name: RunnerName;
+  /**
+   * Verify the toolchain and coverage reporter are available. Throw with a fix
+   * hint if not. Two tiers: without `deep` only cheap checks run (tool versions
+   * and presence, a test file exists, the coverage tool answers a no-op), and
+   * `deep` adds the smoke coverage run.
+   */
+  preflight(repo: RepoConfig, opts?: PreflightOptions): Promise<void>;
+  /**
+   * Non-fatal preflight observations: things that will cost candidates and
+   * repair rounds rather than fail outright, such as a runner with no DOM
+   * environment configured while the source globs still match component files.
+   */
+  warnings?(repo: RepoConfig): Promise<string[]>;
+  /**
+   * Per-runner check on the spliced spec file, run before the suite. A returned
+   * string rejects the candidate as build_failed and goes into the repair loop.
+   * gofmt is what this exists for: Go treats unformatted code as a failure.
+   */
+  checkSpec?(repo: RepoConfig, specPath: string): Promise<string | undefined>;
+  run(repo: RepoConfig, opts: RunOptions): Promise<RunResult>;
+  /** File extension and naming for a new spec next to `relSource`. */
+  specPathFor(repo: RepoConfig, relSource: string): string;
+}
+
+export type CandidateStatus =
+  | "generated"
+  | "build_failed"
+  | "test_failed"
+  | "flaky"
+  | "no_coverage_gain"
+  | "rule_violation"
+  /** Every assertion is a matcher that passes whatever the code did. */
+  | "tautological"
+  /** Never called the code under test with an input, so it pins a declaration. */
+  | "declaration_snapshot"
+  | "weak_assertions"
+  | "accepted"
+  | "frozen";
+
+export interface Candidate {
+  id: string;
+  /** sha256 of normalized test text, used for dedup. */
+  hash: string;
+  segment: Segment;
+  /** Spec file this test targets, relative to cwd. */
+  specPath: string;
+  /** The test code to splice or write. */
+  code: string;
+  /** True if `code` is a complete new file; false if it is a block to append. */
+  wholeFile: boolean;
+  status: CandidateStatus;
+  attempts: number;
+  lastError?: string;
+  delta?: CoverageDelta;
+  /** Mutation spot-check result, present once the gate got that far. */
+  mutation?: MutationSummary;
+  /** Anthropic message history for chat-continuation repair. */
+  history: PromptMessage[];
+  /** System blocks used at generation time, re-sent on repair so the cache prefix matches. */
+  system?: Pick<PromptBlocks, "stable" | "semiStable">;
+}
+
+export interface PromptMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Prompt split into cache-friendly blocks (AutoCover: stable / semi-stable / volatile). */
+export interface PromptBlocks {
+  /** Idiom pack + rules. Identical across a whole run. */
+  stable: string;
+  /** File under test + nearest existing spec. Identical across candidates for one file. */
+  semiStable: string;
+  /** The segment and its missing lines. Unique per candidate. */
+  volatile: string;
+}
+
+export interface GateOptions {
+  /** Number of consecutive passing runs required. */
+  k: number;
+  timeoutMs: number;
+}
+
+/** One surviving mutant, described well enough for the repair prompt. */
+export interface MutantSummary {
+  id: string;
+  line: number;
+  description: string;
+}
+
+/** What the bounded mutation spot-check found for one candidate. */
+export interface MutationSummary {
+  /** Mutants written and re-run. Zero means no operator applied to those lines. */
+  tried: number;
+  /** Mutants that made the candidate fail, which is the outcome we want. */
+  killed: number;
+  survivors: MutantSummary[];
+}
+
+export interface GateResult {
+  status: Extract<
+    CandidateStatus,
+    | "build_failed" | "test_failed" | "flaky" | "no_coverage_gain" | "rule_violation"
+    | "tautological" | "declaration_snapshot" | "weak_assertions" | "accepted"
+  >;
+  runs: RunResult[];
+  delta?: CoverageDelta;
+  mutation?: MutationSummary;
+  error?: string;
+}
+
+export interface RunSummary {
+  repo: string;
+  targets: string[];
+  candidates: Candidate[];
+  accepted: Candidate[];
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Which backend spent them. Absent on summaries built before backends existed. */
+  backend?: GeneratorBackend;
+  /** Set when a run-wide ceiling stopped the run before every target was tried. */
+  limitHit?: "tokens" | "minutes";
+  /** The signal that stopped the run, when one did. The accepted specs are still on disk. */
+  aborted?: string;
+  /** This run's journal path. Absent on a dry run, which leaves nothing on disk to journal. */
+  journal?: string;
+  /** What those tokens cost, per model, when a price is known for the model. Never set on a subscription run. */
+  cost?: RunCost;
+  durationMs: number;
+}
+
+/** Dollar cost of one model's share of a run. */
+export interface ModelCost {
+  model: string;
+  /** Undefined when no price table entry matched the model. */
+  usd?: number;
+}
+
+export interface RunCost {
+  /** Sum of the priced entries. Zero when nothing could be priced. */
+  usd: number;
+  byModel: ModelCost[];
+  /** True when at least one model had no price entry, so `usd` is a floor. */
+  partial: boolean;
+}
