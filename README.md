@@ -168,6 +168,7 @@ falls back to the pack of the same name bundled with covergen.
 | `segments.max_per_file` | `8` | Most segments taken from one source file |
 | `state_dir` | `.covergen` | Directory inside each target repo for state and scratch |
 | `repos` | required | One entry per target repo, at least one |
+| `refresh_base` | `true` | Fast-forward each checkout to its default branch before an unattended run. Only ever a fast-forward: a dirty checkout, or a branch holding commits of its own, is left alone. `false` uses each checkout exactly as it is found |
 
 ### Per-repo keys
 
@@ -669,7 +670,8 @@ files add up to more than `sweep.pr_max_lines` (600 by default,
 `--pr-max-lines <n>` to override), covergen packs them greedily in accepted order
 and opens one draft PR per group, titled `... (part k of n)`.
 
-Every part is branched from the default branch on its own. They are not stacked:
+Every part is branched on its own from the commit the run was proved on (see
+"The base a run is proved on"). They are not stacked:
 any part can merge alone, and the parts can merge in any order. Each body lists
 its own spec files with their line counts and links the other parts, and the
 report records every URL under `repos[].prUrls`.
@@ -710,6 +712,31 @@ checks.
 Exit codes are the usual ones: `0` when at least one test was accepted, `2` when
 none was, `1` for a config error or a ceiling that is not a whole number, `130`
 when a signal stopped the sweep.
+
+### The base a run is proved on
+
+A test is only proven against the commit it ran on, so an unattended run does two
+things about that commit.
+
+Before the run, each checkout is fast-forwarded to its default branch
+(`refresh_base: true`). This is only ever a fast-forward. A checkout with
+uncommitted changes, or on a branch holding commits that are not on the default
+branch, is left exactly where it is and the report says why. Nothing here
+discards a commit, and nothing here is fatal: a checkout that cannot be
+refreshed is used as it is.
+
+At PR time, the branch is cut from that same commit rather than from the default
+branch re-resolved hours later. Two things go wrong when it is not. The branch
+carries tests that were never run against their own base, and a checkout holding
+modified files cannot be moved to the newer commit at all, which is how a night
+of accepted tests once ended with no PR. When the default branch moved during the
+run, the PR body says so: "Base moved by N commits during the run." The PR merges
+as it is; nothing is rebased. When the branch still cannot be cut from that
+commit, it is cut from HEAD instead and the body says that too, because a PR with
+a note on it beats proven tests left on disk.
+
+The report carries both per repo: `repos[].baseSha` is the commit the run was
+proved on, `repos[].baseRefresh` is what happened to the checkout before it.
 
 ### Killing a run
 

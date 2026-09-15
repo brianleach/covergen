@@ -24,6 +24,10 @@ mutation:
 segments:
   max_lines: 50        # CoverUp's cap
   max_per_file: 8
+# Fast-forward each checkout to its default branch before an unattended run, so
+# the tests are proven against the base they will be merged onto. Only ever a
+# fast-forward: a dirty checkout, or one holding commits of its own, is left be.
+refresh_base: true
 repos:
   # A Rails API.
   - name: rails-api

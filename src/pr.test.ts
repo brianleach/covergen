@@ -218,3 +218,125 @@ it("falls back to stdout, then to the exit code, when a failing command says not
     message: "git -c core.quotepath=false status --porcelain failed in /repo: exit 3",
   });
 });
+
+/**
+ * The night the PR step branched from origin/main re-resolved at PR time, found
+ * modified files in the checkout, and left thirty proven tests on disk with no
+ * PR. Both halves of that are covered here against a real git remote.
+ */
+describe("openDraftPr and a base that moved under it", () => {
+  /** git for real, gh faked, with the body the PR would have been opened with. */
+  function watcher() {
+    let body = "";
+    const exec = async (command: string, args: string[], cwd: string) => {
+      if (command !== "gh") return runCmd(command, args, cwd);
+      const at = args.indexOf("--body-file");
+      body = at === -1 ? "" : await readFile(args[at + 1] as string, "utf8");
+      return { stdout: "https://github.com/example/repo/pull/7\n", stderr: "", exitCode: 0 };
+    };
+    return { exec, body: () => body };
+  }
+
+  /** Someone else's commit landing on the default branch while the run gates. */
+  async function moveOrigin(tmp: string, file: string): Promise<void> {
+    const other = join(tmp, `other-${file.replace(/\W/g, "")}`);
+    await git(tmp, "clone", "--quiet", join(tmp, "remote.git"), other);
+    await git(other, "config", "user.email", "someone@example.com");
+    await git(other, "config", "user.name", "someone");
+    await writeFile(join(other, file), "// someone else\n", "utf8");
+    await git(other, "add", "--", file);
+    await git(other, "commit", "-m", "someone else's merge");
+    await git(other, "push", "origin", "main");
+  }
+
+  it("cuts the branch from the commit the tests were proven on and says how far the base moved", async () => {
+    const { tmp, work } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    await moveOrigin(tmp, "src/theirs.ts");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const gh = watcher();
+
+    const url = await openDraftPr({
+      repo: repoAt(work),
+      files: ["src/a.test.ts"],
+      title: "covergen: 1 test accepted in fixture",
+      body: "# body\n",
+      now: new Date(2026, 8, 9),
+      suffix: "base01",
+      baseSha: proved,
+      exec: gh.exec,
+    });
+
+    expect(url).toBe("https://github.com/example/repo/pull/7");
+    const branch = "covergen/20260909-base01";
+    // The parent of the pushed commit is the swept commit, not the moved tip.
+    expect((await git(work, "rev-parse", `origin/${branch}^`)).trim()).toBe(proved);
+    expect((await git(work, "rev-parse", "origin/main")).trim()).not.toBe(proved);
+    expect(gh.body()).toContain("Base moved by 1 commit during the run");
+    expect(gh.body()).toContain(proved.slice(0, 7));
+  });
+
+  it("branches from HEAD rather than losing the tests when the swept commit cannot be checked out", async () => {
+    const { tmp, work } = await fixture();
+    const head = (await git(work, "rev-parse", "HEAD")).trim();
+    // A commit on the same tracked file the checkout has modified: moving to it
+    // would overwrite the local change, so git refuses the branch outright.
+    await moveOrigin(tmp, "src/a.ts");
+    await git(work, "fetch", "origin");
+    const moved = (await git(work, "rev-parse", "origin/main")).trim();
+    await writeFile(join(work, "src", "a.ts"), "export const a = 99;\n", "utf8");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const gh = watcher();
+
+    const url = await openDraftPr({
+      repo: repoAt(work),
+      files: ["src/a.test.ts"],
+      title: "covergen: 1 test accepted in fixture",
+      body: "# body\n",
+      now: new Date(2026, 8, 9),
+      suffix: "base02",
+      baseSha: moved,
+      exec: gh.exec,
+    });
+
+    expect(url).toBe("https://github.com/example/repo/pull/7");
+    const branch = "covergen/20260909-base02";
+    expect((await git(work, "rev-parse", `origin/${branch}^`)).trim()).toBe(head);
+    const committed = await git(work, "show", "--name-only", "--format=", `origin/${branch}`);
+    expect(committed.trim()).toBe("src/a.test.ts");
+    expect(gh.body()).toContain("Branched from HEAD rather than");
+    // The local edit that caused it is still exactly where the run left it.
+    expect(await readFile(join(work, "src", "a.ts"), "utf8")).toBe("export const a = 99;\n");
+  });
+
+  it("gives every part of a split run the same base, and keeps the note through the sibling edit", async () => {
+    const { tmp, work, bodyLog } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    await moveOrigin(tmp, "src/theirs.ts");
+    for (const name of ["a", "b"]) await writeFile(join(work, "src", `${name}.test.ts`), "// generated\n", "utf8");
+
+    const urls = await openDraftPrs({
+      repo: repoAt(work),
+      files: ["src/a.test.ts", "src/b.test.ts"],
+      title: "covergen: 2 tests accepted in fixture",
+      body: "# body\n",
+      maxLines: 600,
+      sizes: [
+        { path: "src/a.test.ts", lines: 400 },
+        { path: "src/b.test.ts", lines: 400 },
+      ],
+      now: new Date(2026, 8, 9),
+      suffixes: ["q1", "q2"],
+      baseSha: proved,
+    });
+
+    expect(urls).toHaveLength(2);
+    for (const suffix of ["q1", "q2"]) {
+      expect((await git(work, "rev-parse", `origin/covergen/20260909-${suffix}^`)).trim()).toBe(proved);
+    }
+    // Three bodies are written: one per part as it opens, and part one again
+    // once part two's URL exists. The note has to survive that rewrite.
+    const bodies = await readFile(bodyLog, "utf8");
+    expect(bodies.match(/Base moved by 1 commit during the run/g)).toHaveLength(3);
+  });
+});
