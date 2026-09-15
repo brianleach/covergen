@@ -738,6 +738,19 @@ a note on it beats proven tests left on disk.
 The report carries both per repo: `repos[].baseSha` is the commit the run was
 proved on, `repos[].baseRefresh` is what happened to the checkout before it.
 
+### Not generating for a file twice
+
+Covergen reads coverage, and an unmerged PR does not change coverage. Two
+consecutive nights will otherwise pick the same uncovered file, spend the same
+tokens on it, and open a second PR that collides with the first.
+
+So with `--pr`, every open PR on a `covergen/` branch is read before targeting
+and the files those PRs write are taken off the list. A repo whose matched
+sources are all covered that way is skipped for the night with reason
+`open_pr_backlog`, and the run summary names the count. Merge or close the
+backlog and the next run picks the files up again. `gh` answering with anything
+else excludes nothing, which is the behavior from before this existed.
+
 ### Killing a run
 
 A long sweep often outlives the patience of whatever launched it. SIGINT and

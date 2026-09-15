@@ -10,6 +10,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { coveredTargets, openPrCover, type OpenPrCover } from "./backlog.js";
 import { refreshBase } from "./base.js";
 import type { Config } from "./config.js";
 import { mutationScore, prBody, prTitle, specQuality, type MutationScore, type SpecQuality } from "./emit.js";
@@ -29,6 +30,10 @@ export interface TargetArgs {
   order: string;
   limit: number;
   refreshBaseline?: boolean;
+  /** Files an open covergen PR already writes. Their sources are not targeted again. */
+  cover?: OpenPrCover;
+  /** Filled in with the targets `cover` dropped, so the run summary can say so. */
+  excluded?: string[];
 }
 
 /** The sweep target list for one repo, ordered and capped. Shared by --repo and --all. */
@@ -43,6 +48,20 @@ export async function sweepTargets(args: TargetArgs): Promise<string[]> {
     targets = toCwdRelative(repo, changed).filter((rel) => matchesSources(repo, rel));
   } else {
     targets = await listSources(repo);
+  }
+  // Before ordering, which is the expensive part: a file whose spec is sitting
+  // in an unmerged covergen PR still reads as uncovered here, and generating for
+  // it again buys a second PR that collides with the first.
+  if (args.cover && targets.length > 0) {
+    const already = coveredTargets(repo, targets, args.cover);
+    if (already.length > 0) {
+      args.excluded?.push(...already);
+      log.info(
+        { repo: repo.name, skipped: already.length, prs: args.cover.prs.map((pr) => pr.url) },
+        "skipping targets whose files an open covergen PR already writes",
+      );
+      targets = targets.filter((rel) => !already.includes(rel));
+    }
   }
   if (targets.length === 0) return [];
   // Order before the cap, or the cap decides which files matter by filename.
@@ -87,6 +106,8 @@ export interface RepoReport {
   baseSha?: string;
   /** What happened to the checkout before the run: fast-forwarded, or why it was not. */
   baseRefresh?: string;
+  /** Targets skipped because an open covergen PR already writes their files. */
+  openPrBacklog?: number;
 }
 
 export interface SweepReport {
@@ -210,9 +231,24 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         : fresh.reason;
       log.info({ repo: repo.name, base: baseSha.slice(0, 7), refresh: baseRefresh }, "base for this run");
 
-      const targets = await sweepTargets({ ...args, repo });
+      // Only the PR path needs this: a run that opens nothing cannot collide
+      // with a PR that is already open. A caller may pass its own, which is how
+      // the loop is exercised without a `gh`.
+      const cover = args.cover ?? (args.pr && !args.dryRun ? await openPrCover(repo) : undefined);
+      const excluded: string[] = [];
+      const targets = await sweepTargets({ ...args, repo, cover, excluded });
       if (targets.length === 0) {
-        add({ ...empty, status: "skipped", baseSha, baseRefresh, reason: "no source files matched" });
+        const backlog = excluded.length > 0;
+        add({
+          ...empty,
+          status: "skipped",
+          baseSha,
+          baseRefresh,
+          openPrBacklog: excluded.length,
+          reason: backlog
+            ? `open_pr_backlog: ${excluded.length} target${excluded.length === 1 ? "" : "s"} already written by an open covergen PR`
+            : "no source files matched",
+        });
         continue;
       }
 
@@ -237,6 +273,7 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         journal: summary.journal,
         baseSha,
         baseRefresh,
+        openPrBacklog: excluded.length,
         ...runFields(summary),
       };
 
@@ -295,6 +332,12 @@ export function reportLines(report: SweepReport): string {
       `  ${r.status.padEnd(7)} ${r.repo}: ${r.accepted}/${r.targetsAttempted} accepted, ` +
         `${r.tokens.toLocaleString("en-US")} tokens${detail ? `, ${detail}` : ""}`,
     );
+  }
+  // Spent tokens are visible on every line above; unspent ones are not, so the
+  // reason a repo was quiet has to be said out loud.
+  const backlog = report.repos.filter((r) => (r.openPrBacklog ?? 0) > 0);
+  for (const r of backlog) {
+    out.push(`  ${r.repo}: ${r.openPrBacklog} target${r.openPrBacklog === 1 ? "" : "s"} left to an open covergen PR`);
   }
   const score = report.mutation;
   if (score.tried > 0) {

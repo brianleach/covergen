@@ -305,3 +305,24 @@ describe("the base a sweep runs on", () => {
     expect(a.openPr).toHaveBeenCalledWith(expect.objectContaining({ baseSha: "" }));
   });
 });
+
+describe("open covergen PRs", () => {
+  it("leaves a repo whose targets an open covergen PR already writes to that PR", async () => {
+    const config = await workspace();
+    const cover = {
+      paths: new Set(["src/a.test.ts"]),
+      prs: [{ number: 11, url: "https://github.com/example/repo/pull/11", branch: "covergen/20260914-aaa" }],
+    };
+    const a = args(config, { pr: true, cover });
+    const report = await sweepAll(a);
+
+    expect(report.repos[0]).toMatchObject({
+      repo: "r1",
+      status: "skipped",
+      openPrBacklog: 1,
+      reason: "open_pr_backlog: 1 target already written by an open covergen PR",
+    });
+    expect(a.runOne).not.toHaveBeenCalled();
+    expect(reportLines(report)).toContain("r1: 1 target left to an open covergen PR");
+  });
+});
