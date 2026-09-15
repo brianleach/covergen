@@ -62,6 +62,8 @@ export interface PipelineArgs {
   apiKey?: string;
   /** Ignore a cached whole-suite baseline and run the suite again. */
   refreshBaseline?: boolean;
+  /** HEAD when the sweep started, recorded in the journal so the PR can be cut from it. */
+  baseSha?: string;
   /**
    * Run-wide ceilings, shared with every other repo in the same sweep. Checked
    * before each target, so the candidate in flight always finishes.
@@ -571,6 +573,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   // guessing. A dry run writes no spec file and so has nothing to journal.
   const stateDir = stateDirFor(config, repo);
   const journal = newJournal(repo.name, journalId());
+  journal.baseSha = args.baseSha;
   const journalFile = dryRun ? undefined : journalPath(stateDir, journal.id);
   const noteJournal = async (status: JournalStatus = "running", reason?: string): Promise<void> => {
     if (!journalFile) return;

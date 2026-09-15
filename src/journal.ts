@@ -39,6 +39,11 @@ export interface RunJournal {
   startedAt: string;
   updatedAt: string;
   status: JournalStatus;
+  /**
+   * HEAD when the run started. The PR step cuts its branch from this commit, and
+   * a run finished by hand has to know which commit its tests were proven on.
+   */
+  baseSha?: string;
   accepted: JournalEntry[];
   /** Why the run ended the way it did, when the status alone does not say it. */
   reason?: string;

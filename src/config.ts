@@ -222,6 +222,13 @@ const ConfigSchema = z.object({
     )
     .default({}),
   state_dir: z.string().default(".covergen"),
+  /**
+   * Fast-forward each target checkout to its default branch before an unattended
+   * run, so the tests are proven against the base they will be merged onto. Only
+   * ever a fast-forward: a checkout that is dirty, or on a branch holding commits
+   * of its own, is left exactly where it is. false keeps the older behavior.
+   */
+  refresh_base: z.boolean().default(true),
   repos: z.array(RepoSchema).min(1),
 });
 

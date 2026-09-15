@@ -10,6 +10,9 @@
  *    refspec so a misconfigured upstream cannot send it anywhere else.
  *  - the checkout is put back on the branch it started on, so the next night
  *    finds it clean and on the branch a human left it on.
+ *  - the branch is cut from `baseSha`, the commit the sweep ran against, so the
+ *    PR holds tests that were proven on the commit they are based on. A branch
+ *    that cannot be cut there is cut from HEAD rather than dropped.
  */
 
 import { execFile } from "node:child_process";
@@ -93,6 +96,30 @@ export interface OpenDraftPrArgs {
   now?: Date;
   /** Fixed random suffix, for tests. */
   suffix?: string;
+  /**
+   * The commit the run was proved on, which is what the branch is cut from. The
+   * default branch re-resolved at PR time is a different commit: the tests never
+   * ran against it, and a checkout holding modified files cannot even be moved
+   * to it. Absent, the default branch is used, which is the older behavior.
+   */
+  baseSha?: string;
+  /**
+   * Collected here as well as appended to the body: a caller that rewrites the
+   * body afterwards has to be able to put them back.
+   */
+  notes?: string[];
+}
+
+/**
+ * Commits the default branch has gained since `sha`. Best effort: a fetch or a
+ * rev-list that fails reports no drift rather than failing a PR that is ready.
+ */
+async function driftFrom(exec: CmdExec, root: string, sha: string, ref: string): Promise<number> {
+  await exec("git", ["fetch", "--quiet", "origin"], root);
+  const res = await exec("git", ["rev-list", "--count", `${sha}..${ref}`], root);
+  if (res.exitCode !== 0) return 0;
+  const moved = Number(res.stdout.trim());
+  return Number.isFinite(moved) && moved > 0 ? moved : 0;
 }
 
 /** Branch, commit, push and open the draft PR. Returns the PR URL `gh` printed. */
@@ -113,8 +140,33 @@ export async function openDraftPr(args: OpenDraftPrArgs): Promise<string> {
 
   try {
     await writeFile(messageFile, `${title}\n\n${body}`, "utf8");
-    await writeFile(bodyFile, body, "utf8");
-    await must(exec, "git", ["checkout", "-b", branch, base.ref], root);
+    // The branch starts at the commit the tests were proven on. Notes are what
+    // the reviewer needs to know about that commit, and they are collected
+    // before the body is written because the checkout itself can add one.
+    const notes = args.notes ?? [];
+    const start = args.baseSha || base.ref;
+    if (args.baseSha) {
+      const moved = await driftFrom(exec, root, args.baseSha, base.ref);
+      if (moved > 0) {
+        notes.push(
+          `Base moved by ${moved} commit${moved === 1 ? "" : "s"} during the run. This branch is cut from ` +
+            `${args.baseSha.slice(0, 7)}, the commit these tests were proven on, not from the current ${base.name}. ` +
+            `It merges as it is; nothing here was rebased.`,
+        );
+      }
+    }
+    const cut = await exec("git", ["checkout", "-b", branch, start], root);
+    if (cut.exitCode !== 0) {
+      // Never lose proven work to a checkout. Branching from HEAD keeps the
+      // working tree as it is, so the accepted specs reach a PR either way.
+      notes.push(
+        `Branched from HEAD rather than ${start}: \`git checkout -b\` refused that commit ` +
+          `(${(cut.stderr || cut.stdout).trim().split("\n").slice(-1)[0] ?? `exit ${cut.exitCode}`}). ` +
+          `The tests here each passed the gate. Check what this branch is based on before merging.`,
+      );
+      await must(exec, "git", ["checkout", "-b", branch], root);
+    }
+    await writeFile(bodyFile, [body, ...notes].join("\n\n"), "utf8");
     // Named paths only. A sweep runs unattended in someone's checkout and must
     // never sweep up an unrelated edit that appeared while it was running.
     await must(exec, "git", ["add", "--", ...files], repo.cwd);
@@ -198,10 +250,15 @@ export async function openDraftPrs(args: OpenDraftPrsArgs): Promise<string[]> {
   const sizes = args.sizes ?? (await specSizes(repo, files));
   const parts = packSpecFiles(sizes, args.maxLines);
   if (parts.length <= 1) {
-    return [await openDraftPr({ repo, files, title, body, exec, now: args.now, suffix: args.suffixes?.[0] })];
+    return [
+      await openDraftPr({ repo, files, title, body, exec, now: args.now, suffix: args.suffixes?.[0], baseSha: args.baseSha }),
+    ];
   }
 
   const urls: (string | undefined)[] = parts.map(() => undefined);
+  // What each part's branch had to say about its base. The second pass rewrites
+  // these bodies from scratch, and a note dropped there is a note nobody reads.
+  const notes: string[][] = parts.map(() => []);
   const infoFor = (index: number): Parameters<typeof partBody>[1] => ({
     index: index + 1,
     total: parts.length,
@@ -217,11 +274,13 @@ export async function openDraftPrs(args: OpenDraftPrsArgs): Promise<string[]> {
       exec,
       now: args.now,
       suffix: args.suffixes?.[i],
+      baseSha: args.baseSha,
+      notes: notes[i],
     });
   }
   for (let i = 0; i < parts.length - 1; i += 1) {
     const url = urls[i];
-    if (url) await updatePrBody({ repo, url, body: partBody(body, infoFor(i)), exec });
+    if (url) await updatePrBody({ repo, url, body: [partBody(body, infoFor(i)), ...(notes[i] ?? [])].join("\n\n"), exec });
   }
   return urls.filter((url): url is string => Boolean(url));
 }

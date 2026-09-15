@@ -291,3 +291,17 @@ describe("sweepAll", () => {
     expect(report.repos[1]).toMatchObject({ repo: "r2", status: "ran" });
     expect(a.runOne).toHaveBeenCalledTimes(1);
   });
+
+describe("the base a sweep runs on", () => {
+  it("records the base for each repo and hands it to the run and the PR", async () => {
+    const config = await workspace();
+    const a = args(config, { pr: true });
+    const report = await sweepAll(a);
+
+    // The fixture repos are directories, not checkouts, which is the case that
+    // must report a reason rather than take the sweep down with it.
+    expect(report.repos[0]).toMatchObject({ repo: "r1", status: "ran", baseSha: "", baseRefresh: "no commit to refresh from" });
+    expect(a.runOne).toHaveBeenCalledWith(expect.objectContaining({ baseSha: "" }));
+    expect(a.openPr).toHaveBeenCalledWith(expect.objectContaining({ baseSha: "" }));
+  });
+});

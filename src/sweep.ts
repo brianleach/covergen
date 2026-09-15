@@ -10,6 +10,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { refreshBase } from "./base.js";
 import type { Config } from "./config.js";
 import { mutationScore, prBody, prTitle, specQuality, type MutationScore, type SpecQuality } from "./emit.js";
 import { changedFiles, listSources, matchesSources, toCwdRelative } from "./git.js";
@@ -82,6 +83,10 @@ export interface RepoReport {
   mutation: MutationScore;
   /** One line per accepted test: what it covers, what it killed, what it asserts. */
   acceptedSpecs: SpecQuality[];
+  /** The commit this repo's run was proved on, which is what its PR branch is cut from. */
+  baseSha?: string;
+  /** What happened to the checkout before the run: fast-forwarded, or why it was not. */
+  baseRefresh?: string;
 }
 
 export interface SweepReport {
@@ -191,9 +196,23 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         }
       }
 
+      // A run is only as good as the base it ran on, so the checkout is brought
+      // up to the default branch first and the commit it lands on is what the
+      // PR branch is cut from hours later.
+      const fresh = await refreshBase({
+        root: repo.root,
+        enabled: config.refresh_base,
+        ignore: [config.state_dir],
+      });
+      const baseSha = fresh.after;
+      const baseRefresh = fresh.refreshed
+        ? `fast-forwarded ${fresh.before.slice(0, 7)} to ${fresh.after.slice(0, 7)} (${fresh.base})`
+        : fresh.reason;
+      log.info({ repo: repo.name, base: baseSha.slice(0, 7), refresh: baseRefresh }, "base for this run");
+
       const targets = await sweepTargets({ ...args, repo });
       if (targets.length === 0) {
-        add({ ...empty, status: "skipped", reason: "no source files matched" });
+        add({ ...empty, status: "skipped", baseSha, baseRefresh, reason: "no source files matched" });
         continue;
       }
 
@@ -206,6 +225,7 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         log,
         apiKey: args.apiKey,
         refreshBaseline: args.refreshBaseline,
+        baseSha,
         limits,
       });
       abortedBy = summary.aborted;
@@ -215,6 +235,8 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         tokens: totalTokens(summary.tokens),
         aborted: summary.aborted,
         journal: summary.journal,
+        baseSha,
+        baseRefresh,
         ...runFields(summary),
       };
 
@@ -235,6 +257,7 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         title: prTitle(summary),
         body: prBody(summary),
         maxLines: prMaxLines,
+        baseSha,
       });
       log.info({ repo: repo.name, urls, parts: urls.length }, urls.length === 1 ? "draft PR opened" : "draft PRs opened");
       add({ ...base, status: "ran", prUrl: urls[0], prUrls: urls });
