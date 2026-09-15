@@ -20,6 +20,7 @@ import { watchForAbort, type AbortWatch } from "./abort.js";
 import type { Config } from "./config.js";
 import { generatorBackend, priceTable, stateDirFor } from "./config.js";
 import { journalId, journalPath, newJournal, writeJournal, type JournalStatus } from "./journal.js";
+import { countLines, specFileFull } from "./chunk.js";
 import { claudeExec, createClaudeCodeGenerator, preflightClaudeCode } from "./claude-code.js";
 import { runCost } from "./cost.js";
 import { applyAccepted, prBody } from "./emit.js";
@@ -188,6 +189,13 @@ async function writeCandidateFiles(dir: string, candidates: Candidate[]): Promis
       .join("\n");
     await writeFile(join(dir, `${c.status}-${c.hash.slice(0, 12)}${ext}`), `${header}\n\n${c.code}\n`, "utf8");
   }
+}
+
+/** Lines in a spec file as it stands on disk, 0 when the run has not created it yet. */
+async function specFileLines(cwd: string, specPath: string): Promise<number> {
+  const abs = resolve(cwd, specPath);
+  if (!existsSync(abs)) return 0;
+  return countLines(await readFile(abs, "utf8").catch(() => ""));
 }
 
 /**
@@ -603,6 +611,17 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
         continue;
       }
 
+      // segments.max_per_file bounds how many candidates one source file gets,
+      // not how many lines they add to its spec. A spec that has already reached
+      // the per-file ceiling waits for the next run rather than growing past what
+      // a reviewer will read in one sitting.
+      const perFileCap = config.sweep?.pr_max_lines_per_file ?? 0;
+      const specLinesBefore = await specFileLines(repo.cwd, specPath);
+      if (specFileFull(specLinesBefore, perFileCap)) {
+        log.info({ target, spec: specPath, lines: specLinesBefore, max: perFileCap }, "spec is at the per-file ceiling, leaving it for the next run");
+        continue;
+      }
+
       const segments = buildSegments({
         path: target,
         source,
@@ -798,6 +817,17 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
             log.info({ spec }, "accepted test written");
           }
           if (!dryRun) persistedSpecs.add(spec);
+          // The block that just landed may have taken the spec over the ceiling.
+          // Everything still queued for it is dropped rather than gated: those
+          // segments are the next run's work, and the file stays reviewable.
+          if (!dryRun && specFileFull(await specFileLines(repo.cwd, spec), perFileCap)) {
+            const rest = queue.slice(i + 1).filter((c) => c.specPath !== spec);
+            if (rest.length < queue.length - i - 1) {
+              log.info({ spec, max: perFileCap, dropped: queue.length - i - 1 - rest.length }, "spec reached the per-file ceiling, leaving its remaining segments for the next run");
+            }
+            queue.length = i + 1;
+            queue.push(...rest);
+          }
           journal.accepted.push({
             spec,
             hash: finalCandidate.hash,

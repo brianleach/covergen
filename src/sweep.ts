@@ -16,7 +16,7 @@ import { changedFiles, listSources, matchesSources, toCwdRelative } from "./git.
 import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js";
 import type { Logger } from "./logger.js";
 import { orderTargetsByGap, orderTargetsByValue, runPipeline } from "./pipeline.js";
-import { dirtyPaths, openDraftPr } from "./pr.js";
+import { dirtyPaths, openDraftPrs } from "./pr.js";
 import type { RepoConfig, RunSummary } from "./types.js";
 
 export interface TargetArgs {
@@ -65,7 +65,10 @@ export interface RepoReport {
   rejected: Record<string, number>;
   tokens: number;
   durationMs: number;
+  /** The first PR opened for this repo, which is the only one when the run fit in one. */
   prUrl?: string;
+  /** Every PR opened for this repo, in part order. */
+  prUrls?: string[];
   /** Why nothing ran, or why no PR was opened. */
   reason?: string;
   /** The signal that stopped this repo's run, when one did. */
@@ -100,10 +103,12 @@ export interface SweepAllArgs extends Omit<TargetArgs, "repo"> {
   dryRun: boolean;
   /** Open a draft PR per repo that accepted a test. */
   pr: boolean;
+  /** Lines of accepted spec one PR may hold. Defaults to sweep.pr_max_lines. */
+  prMaxLines?: number;
   limits: RunLimits;
   /** Injected in tests so the loop can be exercised without a model or a runner. */
   runOne?: typeof runPipeline;
-  openPr?: typeof openDraftPr;
+  openPr?: typeof openDraftPrs;
   dirty?: typeof dirtyPaths;
 }
 
@@ -134,7 +139,8 @@ export function totalMutation(repos: RepoReport[]): MutationScore {
 export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
   const { config, log, limits } = args;
   const runOne = args.runOne ?? runPipeline;
-  const openPr = args.openPr ?? openDraftPr;
+  const openPr = args.openPr ?? openDraftPrs;
+  const prMaxLines = args.prMaxLines ?? config.sweep.pr_max_lines;
   const dirty = args.dirty ?? dirtyPaths;
   const started = Date.now();
   const repos: RepoReport[] = [];
@@ -223,14 +229,15 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         continue;
       }
 
-      const url = await openPr({
+      const urls = await openPr({
         repo,
         files: [...new Set(summary.accepted.map((c) => c.specPath))],
         title: prTitle(summary),
         body: prBody(summary),
+        maxLines: prMaxLines,
       });
-      log.info({ repo: repo.name, url }, "draft PR opened");
-      add({ ...base, status: "ran", prUrl: url });
+      log.info({ repo: repo.name, urls, parts: urls.length }, urls.length === 1 ? "draft PR opened" : "draft PRs opened");
+      add({ ...base, status: "ran", prUrl: urls[0], prUrls: urls });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       log.error({ repo: repo.name, err: reason }, "repo failed, continuing with the next one");
@@ -258,7 +265,9 @@ export function reportLines(report: SweepReport): string {
   const out = [`covergen sweep --all: ${n} ${n === 1 ? "repo" : "repos"} in ${(report.durationMs / 1000).toFixed(1)}s`];
   for (const r of report.repos) {
     const rejected = Object.entries(r.rejected).map(([status, count]) => `${count} ${status}`).join(", ");
-    const detail = r.prUrl ?? r.reason ?? rejected;
+    // Every PR URL, not just the first: a split run is only actionable if the
+    // line that reports it names every part.
+    const detail = (r.prUrls?.length ? r.prUrls.join(", ") : r.prUrl) ?? r.reason ?? rejected;
     out.push(
       `  ${r.status.padEnd(7)} ${r.repo}: ${r.accepted}/${r.targetsAttempted} accepted, ` +
         `${r.tokens.toLocaleString("en-US")} tokens${detail ? `, ${detail}` : ""}`,

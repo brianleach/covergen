@@ -159,6 +159,7 @@ export function buildProgram(): Command {
       "target order before --limit: value (branch-weighted), gap (most uncovered lines first) or glob",
       "value",
     )
+    .option("--pr-max-lines <n>", "lines of accepted spec one draft PR may hold, overriding sweep.pr_max_lines. 0 opens one PR")
     .option("--max-tokens <n>", "run-wide token ceiling, overriding sweep.max_tokens_per_run")
     .option("--max-minutes <n>", "run-wide wall-clock ceiling, overriding sweep.max_minutes")
     .option("--report <path>", "write a JSON report of the run to this path")
@@ -171,6 +172,7 @@ export function buildProgram(): Command {
       changedSince?: string;
       limit: string;
       order: string;
+      prMaxLines?: string;
       maxTokens?: string;
       maxMinutes?: string;
       report?: string;
@@ -186,13 +188,14 @@ export function buildProgram(): Command {
         maxTokens: parseCeiling(opts.maxTokens, "--max-tokens", config.sweep.max_tokens_per_run),
         maxMinutes: parseCeiling(opts.maxMinutes, "--max-minutes", config.sweep.max_minutes),
       });
+      const prMaxLines = parseCeiling(opts.prMaxLines, "--pr-max-lines", config.sweep.pr_max_lines);
       const common = { changedSince: opts.changedSince, order: opts.order, limit, refreshBaseline: opts.refreshBaseline };
 
       // --pr needs the per-repo branch, commit and report bookkeeping the --all
       // loop already does, so one repo is that loop over a config of one.
       if (opts.all || opts.pr) {
         const scoped = opts.all ? config : { ...config, repos: [findRepo(config, opts.repo as string)] };
-        const report = await sweepAll({ ...common, config: scoped, log, apiKey, dryRun: opts.dryRun, pr: opts.pr, limits });
+        const report = await sweepAll({ ...common, config: scoped, log, apiKey, dryRun: opts.dryRun, pr: opts.pr, prMaxLines, limits });
         if (opts.report) await writeReport(opts.report, report);
         process.stdout.write(reportLines(report));
         const opened = report.repos.some((r) => r.prUrl);
