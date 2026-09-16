@@ -53,7 +53,7 @@ function makeRepo(over: Partial<RepoConfig> = {}): RepoConfig {
     cwd,
     sources: ["**/*.go"],
     specPath: (rel) => rel.replace(/\.go$/, "_test.go"),
-    go: { command: ["go", "test"], packages: ["./..."], race: false },
+    go: { command: ["go", "test"], packages: ["./..."], race: true },
     ...over,
   };
 }
@@ -137,14 +137,27 @@ describe("go run", () => {
     expect(packagesForFiles(["a/b/x_test.go", "a/b/y_test.go", "z_test.go"])).toEqual([".", "./a/b"]);
   });
 
-  it("passes -race and -tags when the repo asks for them", async () => {
+  it("passes -race on a gate run and -tags on every run", async () => {
     const { calls, exec } = fakeExec();
     const repo = makeRepo({ go: { command: ["go", "test"], packages: ["./internal/..."], race: true, buildTags: ["integration", "slow"] } });
-    await createGoRunner(exec).run(repo, { files: [], coverage: true, timeoutMs: 1000 });
+    await createGoRunner(exec).run(repo, { files: ["internal/rates_test.go"], coverage: true, timeoutMs: 1000, gate: true });
     const test = calls.find((c) => c[1] === "test")!;
     expect(test).toContain("-race");
     expect(test).toContain("-tags=integration,slow");
     expect(test).toContain("-coverpkg=./internal/...");
+  });
+
+  it("keeps -race off the baseline and off a repo that turned it off", async () => {
+    // The baseline measures coverage, and the instrumented binary costs several
+    // times the run for a check only the gate needs.
+    const { calls, exec } = fakeExec();
+    await createGoRunner(exec).run(makeRepo(), { files: [], coverage: true, timeoutMs: 1000, wholeProject: true });
+    expect(calls.find((c) => c[1] === "test")!).not.toContain("-race");
+
+    const { calls: off, exec: execOff } = fakeExec();
+    const repo = makeRepo({ go: { command: ["go", "test"], packages: ["./..."], race: false } });
+    await createGoRunner(execOff).run(repo, { files: ["rates_test.go"], coverage: false, timeoutMs: 1000, gate: true });
+    expect(off.find((c) => c[1] === "test")!).not.toContain("-race");
   });
 
   it("keeps the exit code and reports the missing profile rather than failing the run", async () => {
@@ -212,7 +225,7 @@ describe("the gofmt check", () => {
 
 describe("go settings", () => {
   it("fills in the defaults when the repo entry has no go block", () => {
-    expect(goSettings(makeRepo({ go: undefined }))).toEqual({ command: ["go", "test"], packages: ["./..."], race: false, buildTags: undefined });
+    expect(goSettings(makeRepo({ go: undefined }))).toEqual({ command: ["go", "test"], packages: ["./..."], race: true, buildTags: undefined });
   });
 });
 

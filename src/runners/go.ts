@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { GoOptions, PreflightOptions, RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
 import { coverageOutDir, runCommand, withPrefix, type ExecFn } from "./exec.js";
 
-const DEFAULTS: GoOptions = { command: ["go", "test"], packages: ["./..."], race: false };
+const DEFAULTS: GoOptions = { command: ["go", "test"], packages: ["./..."], race: true };
 /** `go version` prints "go1.22.5"; anything older than this has no `go test -coverprofile` we support. */
 const MIN_GO = [1, 22] as const;
 const LIST_FORMAT = "{{.ImportPath}}\t{{.Dir}}";
@@ -213,7 +213,11 @@ export function createGoRunner(exec: ExecFn = runCommand): Runner {
       // -count=1 defeats the test cache: without it the repeat runs behind pass^k
       // and every mutant re-run would replay the first result.
       const args = [...command, "-count=1"];
-      if (race) args.push("-race");
+      // -race on the gate runs only. The detector is the one check that sees a
+      // data race, which pass^k never can: k runs on one idle machine all pass and
+      // the same test fails in the repo's CI. Baselines skip it, because they are
+      // measuring coverage and the instrumented binary costs several times the run.
+      if (race && opts.gate) args.push("-race");
       if (buildTags && buildTags.length > 0) args.push(`-tags=${buildTags.join(",")}`);
 
       let dir: string | undefined;

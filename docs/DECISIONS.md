@@ -371,3 +371,30 @@ cost of rejecting some honest tests on genuinely inert code until a repo sets th
 preflight no longer proves the coverage plumbing writes lcov, so a misconfigured `--cov` or
 `go.packages` now surfaces on the first baseline instead of in preflight; the first run still
 catches it, one step later.
+
+## 21. The Go gate runs under -race, and a test may not assume one operating system
+
+2026-09-16
+
+**Context.** Two classes of accepted test that the gate had no way to see, both found in a suite
+that runs on a Linux runner and a macOS runner. A generated Go test wrote a captured variable
+from goroutines nothing synchronized: it passed pass^k on one idle machine every time, and the
+repo's own CI failed it under the race detector. Six others baked one operating system into an
+OS-agnostic package: a real Keychain lookup, `/proc` paths, a hardcoded `PATH_MAX`, a procfs
+trick to make a file unreadable. Every one of them passed the machine it was generated on.
+
+**Decision.** `go.race` defaults to true and applies to the gate runs only, reversing decision
+19's note that it was off to save time: a race the detector catches is exactly a test that would
+flake in CI later, so paying for it at gate time is the cheaper end of the trade. Baselines stay
+uninstrumented, because they measure coverage. Alongside it, a rule, `no-os-specific`, rejects a
+candidate that reaches for `/proc` or `/sys`, a `syscall` constant, the Keychain or the
+`security` binary, or a hardcoded path limit, and one that branches on `runtime.GOOS` without
+skipping, unless the same test guards it with a platform check that calls `t.Skip`. Its verdict
+is `os_specific` and its repair round names the guard. The rule covers go, vitest, jest, bun and
+pytest; the Node and Python runners see the same list minus what their language cannot say.
+
+**Consequences.** A Go gate run costs an instrumented build, several times the plain one, which
+is the price of the check. A repo whose suite cannot bear that sets `go.race: false`. The rule is
+text matching, so a test that names one of those paths in a string it never opens is rejected
+with the rest: the escape hatch is the guard, and `disable_rules` is there for a repo that only
+ever runs on one operating system.

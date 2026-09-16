@@ -141,6 +141,14 @@ describe("repairMessage", () => {
     expect(tautological).toContain("toBeDefined");
     expect(tautological).toContain("Assert the value itself");
   });
+
+  it("names the guard on os_specific", () => {
+    const msg = repairMessage(candidateFor(), gate("os_specific", "no-os-specific: reads a /proc or /sys path"));
+    expect(msg).toContain("reads a /proc or /sys path");
+    expect(msg).toContain('if runtime.GOOS != "linux" { t.Skip("reason") }');
+    expect(msg).toContain("t.TempDir()");
+    expect(msg).not.toContain("\u2014");
+  });
 });
 
 describe("repairLoop", () => {

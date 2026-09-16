@@ -81,7 +81,9 @@ const RepoSchema = z.object({
     .object({
       command: z.array(z.string().min(1)).min(1).default(["go", "test"]),
       packages: z.array(z.string().min(1)).min(1).default(["./..."]),
-      race: z.boolean().default(false),
+      // On by default, and only on the gate runs: a race the detector catches is
+      // exactly a test that would flake in the repo's CI later.
+      race: z.boolean().default(true),
       build_tags: z.array(z.string().min(1)).min(1).optional(),
     })
     .default({}),

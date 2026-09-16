@@ -21,8 +21,10 @@ export interface GoOptions {
   /** Package patterns to test and to measure, e.g. ["./..."]. */
   packages: string[];
   /**
-   * -race. Off by default: the gate already runs every candidate k times, which
-   * is the flake check -race would be bought for, and it triples the run time.
+   * -race, on by default, and only on the gate runs. pass^k cannot see a data
+   * race: k runs on one idle machine all pass, and the detector is what turns
+   * that into a failure here rather than a flake in the repo's own CI. Baselines
+   * run without it, because they measure coverage and the flag triples the time.
    */
   race: boolean;
   /** Build tags, passed as one -tags flag. */
@@ -142,6 +144,12 @@ export interface RunOptions {
    * gate runs and fast-mode baselines leave it off so the delta stays cheap.
    */
   wholeProject?: boolean;
+  /**
+   * This run is judging a candidate, not measuring a baseline. A runner may pay
+   * for strictness here that a baseline cannot afford: the go runner adds -race,
+   * which is the only way the gate sees a data race at all.
+   */
+  gate?: boolean;
 }
 
 export interface RunResult {
@@ -203,6 +211,8 @@ export type CandidateStatus =
   | "tautological"
   /** Never called the code under test with an input, so it pins a declaration. */
   | "declaration_snapshot"
+  /** Assumes one operating system without guarding it, so it fails on the other runner. */
+  | "os_specific"
   | "weak_assertions"
   | "accepted"
   | "frozen";
@@ -271,7 +281,7 @@ export interface GateResult {
   status: Extract<
     CandidateStatus,
     | "build_failed" | "test_failed" | "flaky" | "no_coverage_gain" | "rule_violation"
-    | "tautological" | "declaration_snapshot" | "weak_assertions" | "accepted"
+    | "tautological" | "declaration_snapshot" | "os_specific" | "weak_assertions" | "accepted"
   >;
   runs: RunResult[];
   delta?: CoverageDelta;

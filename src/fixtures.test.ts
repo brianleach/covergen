@@ -10,11 +10,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findRepo, loadConfig } from "./config.js";
 import { discardCoverageDir, readLcov } from "./lcov.js";
+import { ruleViolations } from "./rules.js";
 import { getRunner } from "./runners/index.js";
 import { buildSegments } from "./segments.js";
 import type { RepoConfig } from "./types.js";
@@ -204,5 +206,123 @@ describe("a source path with glob metacharacters", () => {
       }
     },
     120_000,
+  );
+});
+
+/**
+ * The Go gate under `-race`, on the real toolchain.
+ *
+ * Three candidates, the three outcomes the gate has to produce. The racy one
+ * writes a captured variable from goroutines nobody synchronizes: it passes the
+ * plain run and pass^k with it, and only the detector rejects it, which is the
+ * argument for the flag. The procfs one is turned away by `no-os-specific`
+ * before anything runs, and the guarded one, reading the same path behind a
+ * `runtime.GOOS` skip, is clean and passes instrumented.
+ *
+ * The fixture is copied to a temp directory rather than written into
+ * fixtures/go-min: these files must never be left behind for the baseline test
+ * above to compile.
+ */
+describe("the Go gate under -race", () => {
+  const source: RepoConfig = findRepo(config, "go-min");
+  const run = hasGo() ? it : it.skip;
+
+  const racy = `package rates
+
+import (
+	"sync"
+	"testing"
+)
+
+func TestServiceFeeConcurrently(t *testing.T) {
+	total := 0
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			total += ServiceFee(100)
+		}()
+	}
+	wg.Wait()
+	if total < 10 {
+		t.Errorf("total = %d, want at least 10", total)
+	}
+}
+`;
+
+  const procfs = `package rates
+
+import (
+	"os"
+	"testing"
+)
+
+func TestRefundFeeAgainstProcfs(t *testing.T) {
+	if _, err := os.Stat("/proc/self/cmdline"); err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := RefundFee(2000); got != 25 {
+		t.Errorf("RefundFee(2000) = %d, want 25", got)
+	}
+}
+`;
+
+  const guarded = `package rates
+
+import (
+	"os"
+	"runtime"
+	"testing"
+)
+
+func TestRefundFeeAgainstProcfs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("/proc/self/cmdline only exists on Linux")
+	}
+	if _, err := os.Stat("/proc/self/cmdline"); err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := RefundFee(2000); got != 25 {
+		t.Errorf("RefundFee(2000) = %d, want 25", got)
+	}
+}
+`;
+
+  run(
+    "fails the racy candidate, passes the guarded one, and leaves the procfs one to the rule",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "covergen-go-race-"));
+      const repo: RepoConfig = { ...source, root: dir, cwd: dir };
+      const runner = getRunner("go");
+      const gate = { coverage: false, timeoutMs: 300_000, gate: true };
+      try {
+        for (const name of ["go.mod", "rates.go", "rates_test.go"]) {
+          copyFileSync(join(source.cwd, name), join(dir, name));
+        }
+
+        // Rules first: neither the racy nor the guarded candidate is rejectable on
+        // its text, and the procfs one never reaches the runner.
+        expect(ruleViolations(racy, "go")).toEqual([]);
+        expect(ruleViolations(guarded, "go")).toEqual([]);
+        expect(ruleViolations(procfs, "go").map((v) => v.id)).toEqual(["no-os-specific"]);
+
+        writeFileSync(join(dir, "guarded_test.go"), guarded);
+        const clean = await runner.run(repo, { ...gate, files: ["guarded_test.go"] });
+        expect(clean.ok, `guarded candidate failed:\n${clean.stderr}\n${clean.stdout}`).toBe(true);
+        rmSync(join(dir, "guarded_test.go"));
+
+        writeFileSync(join(dir, "racy_test.go"), racy);
+        const uninstrumented = await runner.run(repo, { files: ["racy_test.go"], coverage: false, timeoutMs: 300_000 });
+        expect(uninstrumented.ok, "the racy candidate should pass without -race, which is the point").toBe(true);
+
+        const instrumented = await runner.run(repo, { ...gate, files: ["racy_test.go"] });
+        expect(instrumented.ok).toBe(false);
+        expect(`${instrumented.stdout}${instrumented.stderr}`).toContain("DATA RACE");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    300_000,
   );
 });

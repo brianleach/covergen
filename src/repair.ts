@@ -81,6 +81,14 @@ export function repairMessage(candidate: Candidate, result: GateResult): string 
         "Pick one exported function or method from the segment, call it with a real argument, and assert on what comes back or on what it changed.",
         ONE_BLOCK,
       ].join("\n");
+    case "os_specific":
+      return [
+        `That test only runs on one operating system. The rules said:${errorBlock}`,
+        "",
+        'The suite runs on a Linux runner and on a macOS runner, so anything that exists on one of them has to be guarded: wrap it in a platform check that skips, `if runtime.GOOS != "linux" { t.Skip("reason") }`, and put the skip before the setup it protects.',
+        "Better still, drop the host dependency: files belong in t.TempDir(), environment variables in t.Setenv, and a path length belongs in a constant the code under test owns.",
+        ONE_BLOCK,
+      ].join("\n");
     case "tautological":
       return [
         `That test calls the code but every assertion passes no matter what the code does. The rules said:${errorBlock}`,

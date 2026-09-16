@@ -37,9 +37,14 @@ describe("rules registry", () => {
     for (const rule of rules) expect(rule.description.length).toBeGreaterThan(10);
   });
 
-  it("rulesFor returns every rule for each runner when none are runner-scoped", () => {
-    for (const runner of ["rspec", "vitest", "bun", "jest"] as const) {
+  it("rulesFor returns every rule a runner is in scope for", () => {
+    // no-os-specific is the one runner-scoped rule: rspec and cargo are out of it.
+    for (const runner of ["vitest", "bun", "jest", "go", "pytest"] as const) {
       expect(rulesFor(runner).length).toBe(rules.length);
+    }
+    for (const runner of ["rspec", "cargo"] as const) {
+      expect(rulesFor(runner).map((r) => r.id)).not.toContain("no-os-specific");
+      expect(rulesFor(runner).length).toBe(rules.length - 1);
     }
   });
 });
@@ -244,6 +249,73 @@ describe("assertionKinds", () => {
   it("reports nothing for a test with no assertion, and ignores commented ones", () => {
     expect(assertionKinds("it('x', () => { doThing(1); });")).toEqual([]);
     expect(assertionKinds("// expect(a).toBe(b)")).toEqual([]);
+  });
+});
+
+describe("no-os-specific", () => {
+  const procfs = `func TestLimit(t *testing.T) {
+	data, err := os.ReadFile("/proc/self/limits")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got := ParseLimit(string(data)); got != 1024 {
+		t.Errorf("ParseLimit() = %d, want 1024", got)
+	}
+}`;
+
+  const guarded = `func TestLimit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("/proc/self/limits only exists on Linux")
+	}
+	data, err := os.ReadFile("/proc/self/limits")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got := ParseLimit(string(data)); got != 1024 {
+		t.Errorf("ParseLimit() = %d, want 1024", got)
+	}
+}`;
+
+  it("rejects a Go test that reads procfs, and accepts the same test behind a skip", () => {
+    const found = ruleViolations(procfs, "go");
+    expect(found.map((v) => v.id)).toEqual(["no-os-specific"]);
+    expect(found[0]?.message).toContain("/proc");
+    expect(verdictFor(found)).toBe("os_specific");
+    expect(check(guarded, "go")).toEqual([]);
+  });
+
+  it("rejects a syscall constant, the Keychain and a hardcoded path limit", () => {
+    const syscall = `func TestFlag(t *testing.T) {\n\tif got := OpenFlags(syscall.O_NOATIME); got != 1 {\n\t\tt.Errorf("OpenFlags() = %d, want 1", got)\n\t}\n}`;
+    const keychain = `func TestKey(t *testing.T) {\n\tout, err := exec.Command("security", "find-generic-password", "-s", "svc").Output()\n\tif err != nil {\n\t\tt.Fatalf("security error = %v", err)\n\t}\n\tif got := ParseKey(string(out)); got != "k" {\n\t\tt.Errorf("ParseKey() = %q, want \\"k\\"", got)\n\t}\n}`;
+    const pathMax = `func TestPath(t *testing.T) {\n\tif got := len(BuildPath("a")); got >= PATH_MAX {\n\t\tt.Errorf("len(BuildPath()) = %d, want under the limit", got)\n\t}\n}`;
+    expect(ids(check(syscall, "go"))).toContain("no-os-specific");
+    expect(ids(check(keychain, "go"))).toContain("no-os-specific");
+    expect(ids(check(pathMax, "go"))).toContain("no-os-specific");
+  });
+
+  it("rejects a runtime.GOOS branch that skips nothing", () => {
+    const branching = `func TestSeparator(t *testing.T) {\n\twant := "/tmp/a"\n\tif runtime.GOOS == "windows" {\n\t\twant = "C:\\\\tmp\\\\a"\n\t}\n\tif got := JoinPath("tmp", "a"); got != want {\n\t\tt.Errorf("JoinPath() = %q, want %q", got, want)\n\t}\n}`;
+    const found = ruleViolations(branching, "go");
+    expect(found.map((v) => v.id)).toEqual(["no-os-specific"]);
+    expect(found[0]?.message).toContain("t.Skip");
+  });
+
+  it("applies a lighter version to the Node and Python runners, and not to rspec", () => {
+    const js = `it("reads the limit", () => {\n  expect(parseLimit(readFileSync("/proc/self/limits", "utf8"))).toBe(1024);\n});`;
+    const py = `def test_limit():\n    with open("/proc/self/limits") as fh:\n        assert parse_limit(fh.read()) == 1024\n`;
+    const pyGuarded = `def test_limit():\n    if sys.platform == "linux":\n        with open("/proc/self/limits") as fh:\n            assert parse_limit(fh.read()) == 1024\n`;
+    expect(ids(check(js, "vitest"))).toContain("no-os-specific");
+    expect(ids(check(js, "jest"))).toContain("no-os-specific");
+    expect(ids(check(py, "pytest"))).toContain("no-os-specific");
+    expect(ids(check(pyGuarded, "pytest"))).not.toContain("no-os-specific");
+    // The rule is off for rspec, so the same text only trips the generic rules.
+    expect(ids(check(py.replace("def test_limit():", 'it "reads" do'), "rspec"))).not.toContain("no-os-specific");
+  });
+
+  it("leaves a portable test alone, and is turned off by disable_rules", () => {
+    const portable = `func TestFee(t *testing.T) {\n\tdir := t.TempDir()\n\tif got := WriteFee(dir, 25); got != 25 {\n\t\tt.Errorf("WriteFee() = %d, want 25", got)\n\t}\n}`;
+    expect(check(portable, "go")).toEqual([]);
+    expect(verdictFor(ruleViolations(procfs, "go", ["no-os-specific"]))).toBeUndefined();
   });
 });
 
