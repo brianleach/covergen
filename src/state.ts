@@ -137,6 +137,7 @@ const FROZEN_STATUSES = new Set([
   "rule_violation",
   "tautological",
   "declaration_snapshot",
+  "os_specific",
   "weak_assertions",
 ]);
 

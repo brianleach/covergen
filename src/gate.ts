@@ -237,6 +237,7 @@ export async function evaluate(args: EvaluateArgs): Promise<GateResult> {
       coverage: true,
       timeoutMs: opts.timeoutMs,
       env,
+      gate: true,
     });
     runs.push(first);
 
@@ -251,6 +252,7 @@ export async function evaluate(args: EvaluateArgs): Promise<GateResult> {
         coverage: false,
         timeoutMs: opts.timeoutMs,
         env,
+        gate: true,
       });
       runs.push(repeat);
       if (!repeat.ok) {
@@ -336,6 +338,7 @@ export async function evaluate(args: EvaluateArgs): Promise<GateResult> {
           coverage: false,
           timeoutMs: mutation.timeoutMs,
           env,
+          gate: true,
         });
         runs.push(run);
         // Not applicable, not killed: a mutant the parser rejected is dropped from

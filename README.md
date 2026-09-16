@@ -187,7 +187,7 @@ falls back to the pack of the same name bundled with covergen.
 | `validate` | no, default `[]` | Commands run in `cwd` after the coverage gate passes, with the candidate still spliced in |
 | `disable_rules` | no, default `[]` | Rule ids from `src/rules.ts` to switch off for this repo, e.g. `[behavioral-evidence]`. An unknown id is a config error |
 | `pytest` | no | pytest only. `command` (default `["python","-m","pytest"]`), `package` (the `--cov` target, default derived from `sources`) and `test_glob` (default `tests/**/test_*.py`) |
-| `go` | no | go only. `command` (default `["go","test"]`), `packages` (default `["./..."]`), `race` (default `false`) and `build_tags` |
+| `go` | no | go only. `command` (default `["go","test"]`), `packages` (default `["./..."]`), `race` (default `true`, applied to the gate runs only) and `build_tags` |
 | `cargo` | no | cargo only. `command` (default `["cargo","llvm-cov"]`), `packages` (crates to test, each passed as `-p <crate>`; default `[]`, the whole workspace) and `test_args`, extra arguments passed to the test harness after `--` |
 | `allow_no_mutants` | no, default `false` | Accept candidates the mutation spot-check found nothing applicable to mutate on, instead of rejecting them as `weak_assertions` |
 
@@ -381,9 +381,12 @@ Three more things differ from the other runners:
 - **`gofmt` is a gate.** A candidate that is not gofmt formatted is rejected as
   `build_failed` before the suite runs, and the `gofmt -d` diff goes into the
   repair loop. Go projects treat unformatted code as a failure and so does this.
-- **`-race` is off by default.** The gate already runs every candidate `gate.k`
-  times, which is the flake check `-race` would be bought for, and it triples the
-  time. Set `go.race: true` per repo when the suite needs it.
+- **`-race` is on, for the gate runs only.** pass^k cannot see a data race: k
+  runs on one idle machine all pass, and the same test fails the first time it
+  shares a runner, which is a flake in the repo's CI rather than a rejection here.
+  The detector is the only check that turns that into a failure at gate time, so
+  the gate runs pay for it and the baselines, which measure coverage, do not. Set
+  `go.race: false` per repo when the instrumented build is too slow to bear.
 
 `sources` wants the shape below, because Go keeps its tests beside the code and
 they would otherwise be offered as generation targets:
@@ -396,7 +399,7 @@ repos:
     exclude: ["**/*_test.go"]
     go:
       packages: ["./..."]      # what is tested and what -coverpkg measures
-      race: false
+      race: true               # -race on the gate runs, not on the baseline
       build_tags: ["integration"]
 ```
 
@@ -491,7 +494,7 @@ not just current behavior.
 ### Why a test gets rejected
 
 Every reason a candidate can be turned away, in the order the pipeline applies
-them. The first eight are rules in `src/rules.ts`, checked on the text before
+them. The first nine are rules in `src/rules.ts`, checked on the text before
 anything is run, and they apply again to every repaired candidate. A repo can turn
 any of them off with `disable_rules`.
 
@@ -499,6 +502,7 @@ any of them off with `disable_rules`.
 |---|---|
 | `no-sleep` | Sleeps or waits on a timer instead of driving time directly |
 | `no-deadline-poll` | Polls a fixed number of times with a sleep between attempts and no wall-clock deadline or context timeout. pass^k on one machine cannot see it: the test passes k times alone and fails the first time it shares a runner |
+| `no-os-specific` | Assumes one operating system (a `/proc` or `/sys` path, a `syscall` constant, the Keychain, a hardcoded path limit, or a `runtime.GOOS` branch that skips nothing) without a guard that skips. Go, vitest, jest, bun and pytest |
 | `no-real-network` | Makes a real HTTP call with no stub anywhere in the file |
 | `no-real-clock` | Reads the real clock without freezing time first |
 | `no-skipped-tests` | Contains a skipped, pending, todo or x-prefixed example |
@@ -527,6 +531,7 @@ a CI slot on every run forever, and it reports confidence that is not there.
 | `no_coverage_gain` | Passed but covered no new lines, lost lines, or produced no lcov | Often means another spec already covers those lines |
 | `tautological` | Every assertion is a weak matcher: `toBeDefined`, `toBeTruthy`, `not.toThrow`, a snapshot, a value compared to itself | Assert the value the code returns. `toBeFalsy`, `toBeNull` and `be_nil` are not weak and are never rejected for it |
 | `declaration_snapshot` | Never called the code under test with an input, so it pins a declaration rather than behavior | Call one exported function with a real argument. Both verdicts share one repair round with `weak_assertions` |
+| `os_specific` | Reaches for something only one operating system has, with no platform guard that skips | Use the portable equivalent (`t.TempDir()` for files), or guard it with `if runtime.GOOS != "linux" { t.Skip(...) }` |
 | `weak_assertions` | Passed and gained coverage but missed the mutation floor or ratio | The test runs the code without asserting on it. The PR body names the mutants it let through |
 | `accepted` | Passed everything and was written into the spec file | Review it like any other code |
 | `frozen` | The same test text was already tried in an earlier run, or is already accepted | Nothing. Frozen hashes are skipped so no tokens are spent on them |

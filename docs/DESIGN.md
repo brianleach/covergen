@@ -92,7 +92,13 @@ runs without a build error, passes k consecutive runs, the runner produced an lc
 lines, it newly covered at least one line of the target source, every `repo.validate` command exits zero
 with it still spliced in, and, when the mutation spot-check is on and produced at least one mutant, at
 least `min_killed` of them made the test fail. Any other outcome is a named status: `build_failed`,
-`test_failed`, `flaky`, `no_coverage_gain`, `weak_assertions`, `tautological` or `declaration_snapshot`.
+`test_failed`, `flaky`, `no_coverage_gain`, `weak_assertions`, `tautological`, `declaration_snapshot` or
+`os_specific`.
+
+The Go gate runs the candidate under `-race`. pass^k sees a flake only when the same run fails twice on
+the same machine, and a data race is the case it cannot see at all, so the detector is what turns it into
+a rejection here instead of a failure in the repo's CI later. The baselines stay uninstrumented: they
+measure coverage, and the flag costs several times the run.
 
 There are two baselines and they measure different things. Gain is measured against the whole-suite
 baseline, so a line counts as a gain only if nothing in the suite covered it. Loss is measured against a

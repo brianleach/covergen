@@ -50,6 +50,31 @@ func TestRefundFee(t *testing.T) {
 - No `time.Sleep` to order anything: use a channel, `sync.WaitGroup`, or call the
   code directly. No unseeded randomness, no reading the real clock in an assertion.
 
+## Portable, and race free
+
+- The suite runs on a Linux runner and on a macOS runner. The test has to pass on
+  both, so nothing may assume one of them: no `/proc` or `/sys` path, no
+  `syscall` constant, no Keychain or `security` call, no hardcoded `PATH_MAX`.
+- Paths come from `t.TempDir()` and `filepath.Join`, never from a string with a
+  leading `/` written by hand, and never from a separator typed as `/` or `\`.
+- Genuine platform behavior is guarded by a check that skips, before the setup it
+  protects:
+
+```go
+if runtime.GOOS != "linux" {
+	t.Skip("cgroup limits are read from /sys, which only Linux has")
+}
+```
+
+  A `runtime.GOOS` branch that changes the expectation instead of skipping is not
+  a guard: it still runs on the other machine.
+
+- The gate runs `go test -race`, so every goroutine the test starts must be
+  synchronized: `sync.WaitGroup` or a channel to join it, a mutex or a channel for
+  anything it writes. A value shared with a goroutine and read after it, without
+  either, is a data race, and the detector fails the test whether or not the
+  arithmetic came out right.
+
 ## Assert on behavior
 
 - Compare the returned value to the value written out in the test. Never assert only

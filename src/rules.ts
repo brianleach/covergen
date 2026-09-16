@@ -13,7 +13,10 @@
 import type { CandidateStatus, RunnerName } from "./types.js";
 
 /** The candidate status a rule violation produces. */
-export type RuleStatus = Extract<CandidateStatus, "rule_violation" | "tautological" | "declaration_snapshot">;
+export type RuleStatus = Extract<
+  CandidateStatus,
+  "rule_violation" | "tautological" | "declaration_snapshot" | "os_specific"
+>;
 
 /** One rule firing on one candidate. */
 export interface RuleViolation {
@@ -26,8 +29,8 @@ export interface Rule {
   id: string;
   /** One line, written to be pasted straight into the prompt. */
   description: string;
-  /** Which runner the rule applies to. "all" (the default) applies everywhere. */
-  runner?: RunnerName | "all";
+  /** Which runner(s) the rule applies to. "all" (the default) applies everywhere. */
+  runner?: RunnerName | readonly RunnerName[] | "all";
   /** The status a violation of this rule produces, unless `test` names another. */
   status: RuleStatus;
   /** Returns a violation message, or null when the code is clean. */
@@ -83,6 +86,51 @@ const DEADLINE =
 /** Time control: fake timers, or Rails/ActiveSupport time travel. */
 const FAKE_TIME =
   /useFakeTimers|setSystemTime|advanceTimersBy|travel_to|travel\s*\(|freeze_time|Timecop|vi\.setSystemTime|jest\.setSystemTime|freezegun/;
+
+/**
+ * Portability: what a test reaches for that only one operating system has.
+ *
+ * A suite that runs on a Linux runner and a macOS runner sees both, so a test
+ * written against one of them passes on the machine that generated it and fails
+ * on the other. The Go list is the long one because Go tests reach for the host
+ * directly; a Node or Python test can only trip the paths and the host binaries,
+ * so those two runners get the same list minus what their language cannot say.
+ */
+const OS_SPECIFIC: { pattern: RegExp; what: string }[] = [
+  {
+    pattern: /(?:^|[^\w.:/])\/(?:proc|sys)\//m,
+    what: "reads a /proc or /sys path, which Linux has and macOS does not",
+  },
+  {
+    pattern: /\bsyscall\.[A-Z]\w*/,
+    what: "uses a syscall constant, whose value and whose existence differ per operating system",
+  },
+  {
+    pattern: /\bKeychain\b|\bkeychain\b|find-generic-password|\bsecurity\s+(?:add|find|delete)-/,
+    what: "reaches the macOS Keychain or the security binary, which no Linux runner has",
+  },
+  {
+    pattern: /\bPATH_MAX\b|\bMAX_PATH\b/,
+    what: "hardcodes a path length limit, which is not the same number on every operating system",
+  },
+];
+
+/** The skip that keeps platform behavior off the runner that does not have it. */
+const SKIP_CALL = /\bt\.Skipf?\s*\(|\btesting\.Short\s*\(\s*\)/;
+
+/** A check on which operating system the test is running: Go, Node, Python. */
+const PLATFORM_CHECK = /\bruntime\.GOOS\b|\bprocess\.platform\b|\bsys\.platform\b|\bplatform\.system\s*\(/;
+
+/**
+ * True when the platform-specific code is fenced off. Go has to skip, because a
+ * `runtime.GOOS` branch that asserts something else still runs everywhere. Node
+ * and Python cannot skip at all (no-skipped-tests forbids it), so a check on the
+ * platform around the assertion is the guard those two have.
+ */
+export function guardsPlatform(code: string): boolean {
+  if (/\bruntime\.GOOS\b/.test(code)) return SKIP_CALL.test(code);
+  return PLATFORM_CHECK.test(code);
+}
 
 /**
  * Assertion analysis, for the run report: what kind of check each assertion makes.
@@ -228,6 +276,27 @@ export const rules: Rule[] = [
     },
   },
   {
+    id: "no-os-specific",
+    runner: ["go", "vitest", "jest", "bun", "pytest"],
+    status: "os_specific",
+    description:
+      "Never assume one operating system. Tests run on Linux and on macOS runners, so keep /proc and /sys paths, syscall constants, the Keychain and hardcoded path limits out of the test: use t.TempDir (or the runner's temp helper), and guard genuine platform behavior with a runtime.GOOS check that calls t.Skip.",
+    test: (code) => {
+      const c = stripLineComments(code);
+      const found = OS_SPECIFIC.filter((o) => o.pattern.test(c)).map((o) => o.what);
+      if (found.length === 0) {
+        // A GOOS comparison that skips nothing is the other half of the same bug:
+        // the branch runs on both machines and only the expectation changes.
+        if (has(c, /\bruntime\.GOOS\s*[=!]=/) && !has(c, SKIP_CALL)) {
+          return 'compares runtime.GOOS but never skips, so it still runs on the other operating system with a different expectation; make the guard skip: if runtime.GOOS != "linux" { t.Skip("...") }';
+        }
+        return null;
+      }
+      if (guardsPlatform(c)) return null;
+      return `${found.join("; ")}; the suite runs on Linux and on macOS runners. Use a portable equivalent (t.TempDir for files), or guard it: if runtime.GOOS != "linux" { t.Skip("...") }`;
+    },
+  },
+  {
     id: "no-real-network",
     status: "rule_violation",
     description: "Never make a real network call. Stub every HTTP client (WebMock in RSpec, vi.mock/msw in JS).",
@@ -342,9 +411,13 @@ export const ruleIds: string[] = rules.map((r) => r.id);
  * the ids the repo turned off with `disable_rules`.
  */
 export function rulesFor(runner: RunnerName, disabled: readonly string[] = []): Rule[] {
-  return rules.filter(
-    (r) => (r.runner === undefined || r.runner === "all" || r.runner === runner) && !disabled.includes(r.id),
-  );
+  return rules.filter((r) => appliesTo(r, runner) && !disabled.includes(r.id));
+}
+
+/** True when the rule covers this runner. Unset and "all" cover every runner. */
+function appliesTo(rule: Rule, runner: RunnerName): boolean {
+  if (rule.runner === undefined || rule.runner === "all") return true;
+  return typeof rule.runner === "string" ? rule.runner === runner : rule.runner.includes(runner);
 }
 
 /** Every violation for `code`, in registry order. Empty means clean. */
