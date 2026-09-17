@@ -50,6 +50,27 @@ export interface CargoOptions {
 export type GeneratorBackend = "api" | "claude-code";
 
 /** One repo entry from covergen.yaml, resolved (paths absolute). */
+/**
+ * The repo entry's `explore:` block, read only by explore mode. Everything here
+ * is a name or a pattern: the base URL and the session file are named as
+ * environment variables, so neither a private preview URL nor the path to the
+ * owner's session is ever written into the config or into this repository.
+ */
+export interface ExploreOptions {
+  /** Environment variable holding the base URL to explore. */
+  baseUrlEnv: string;
+  /** Environment variable holding the path to a Playwright storageState file. */
+  storageStateEnv: string;
+  /** Route patterns whose writes may be generated against. Empty means read-only. */
+  allowMutations: string[];
+  /** Hard ceiling on pages one crawl reads. */
+  maxPages: number;
+  /** Route patterns the crawl never visits, e.g. logout. */
+  ignorePatterns: string[];
+  /** Glob, relative to cwd, for the end to end specs that already exist. */
+  specGlob: string;
+}
+
 export interface RepoConfig {
   name: string;
   root: string;
@@ -95,6 +116,8 @@ export interface RepoConfig {
   go?: GoOptions;
   /** Settings for the cargo runner. Ignored by every other runner. */
   cargo?: CargoOptions;
+  /** Settings for explore mode. Absent means this repo has no explorable target. */
+  explore?: ExploreOptions;
 }
 
 /** Line coverage for one file. Lines absent from the map were not instrumented. */

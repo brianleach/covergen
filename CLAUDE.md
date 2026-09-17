@@ -49,6 +49,7 @@ cli: covergen run --repo X --file path   |   covergen sweep --repo X --changed-s
 | `src/emit.ts` | Write accepted tests, revert on failure, PR body |
 | `src/pipeline.ts` | Orchestrates one run end to end, writes RunSummary |
 | `src/cli.ts` | commander entrypoint |
+| `src/explore*.ts` | Explore mode (`covergen explore --dry-run`): read-only crawl of a live web app, flow model, ranking, matching against existing Playwright specs, uncovered-flow report. Design in `docs/explore-mode.md` |
 | `idioms/*.md` | Per-runner idiom packs, loaded verbatim into the stable prompt block |
 
 ## Conventions
