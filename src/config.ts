@@ -96,6 +96,24 @@ const RepoSchema = z.object({
       test_args: z.array(z.string()).default([]),
     })
     .default({}),
+  /**
+   * Explore mode's target. Absent means this repo has no explorable web app.
+   * The URL and the session file are named, never written: both are environment
+   * variables so a private preview URL and a path to the owner's session stay
+   * out of the config file and out of this repository.
+   */
+  explore: z
+    .object({
+      base_url_env: z.string().min(1).default("COVERGEN_EXPLORE_BASE_URL"),
+      storage_state_env: z.string().min(1).default("COVERGEN_EXPLORE_STORAGE_STATE"),
+      /** Route patterns whose writes may be generated against. Default is read-only. */
+      allow_mutations: z.array(z.string().min(1)).default([]),
+      max_pages: z.number().int().positive().max(500).default(25),
+      ignore_patterns: z.array(z.string().min(1)).default(["/logout", "/logout/**", "/signout", "/sign-out"]),
+      /** Where the end to end specs that already exist live, relative to cwd. */
+      spec_glob: z.string().min(1).default("e2e/**/*.spec.ts"),
+    })
+    .optional(),
   /** Accept candidates the mutation spot-check found nothing to mutate on. */
   allow_no_mutants: z.boolean().default(false),
   /**
@@ -309,6 +327,16 @@ export function loadConfig(path: string): Config {
       pytest: { command: r.pytest.command, package: r.pytest.package, testGlob: r.pytest.test_glob },
       go: { command: r.go.command, packages: r.go.packages, race: r.go.race, buildTags: r.go.build_tags },
       cargo: { command: r.cargo.command, packages: r.cargo.packages, testArgs: r.cargo.test_args },
+      explore: r.explore
+        ? {
+            baseUrlEnv: r.explore.base_url_env,
+            storageStateEnv: r.explore.storage_state_env,
+            allowMutations: r.explore.allow_mutations,
+            maxPages: r.explore.max_pages,
+            ignorePatterns: r.explore.ignore_patterns,
+            specGlob: r.explore.spec_glob,
+          }
+        : undefined,
     };
   });
   return { ...parsed, repos, warnings };
