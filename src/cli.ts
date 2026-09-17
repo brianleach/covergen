@@ -15,6 +15,9 @@ import { Command } from "commander";
 import { EXIT_ABORTED } from "./abort.js";
 import { claudeExec, preflightClaudeCode } from "./claude-code.js";
 import { findRepo, generatorBackend, loadConfig, type Config } from "./config.js";
+import { buildFlows, crawl, exploreEnv, renderReport } from "./explore.js";
+import { openBrowserReader } from "./explore-browser.js";
+import { indexSpecs, loadSpecs } from "./explore-specs.js";
 import { readLcov, summarize } from "./lcov.js";
 import { createLimits, parseCeiling, totalTokens } from "./limits.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -280,6 +283,33 @@ export function buildProgram(): Command {
       } catch (err) {
         process.stdout.write(`FAIL ${repo.name} (${repo.runner})\n${err instanceof Error ? err.message : String(err)}\n`);
         process.exitCode = EXIT_ERROR;
+      }
+    });
+
+  program
+    .command("explore")
+    .description("Crawl a live web app read-only and print the user flows no end to end spec covers")
+    .requiredOption("--repo <name>", "repo name from covergen.yaml, with an explore: block")
+    .requiredOption("--dry-run", "report only. The only mode explore has today; generation is not built")
+    .option("--max-pages <n>", "override explore.max_pages for this crawl")
+    .action(async (opts: { repo: string; maxPages?: string }) => {
+      const { config, log } = context(program);
+      const repo = findRepo(config, opts.repo);
+      if (!repo.explore) throw new Error(`repo "${repo.name}" has no explore: block in covergen.yaml.`);
+      const { baseUrl, storageStatePath } = exploreEnv(repo.explore);
+      const maxPages = parseCeiling(opts.maxPages, "--max-pages", repo.explore.maxPages);
+      if (maxPages < 1) throw new Error("--max-pages must be at least 1. There is no unlimited crawl.");
+      // Logged as a boolean, never as a path: the session file is the credential.
+      log.info({ repo: repo.name, baseUrl, session: storageStatePath !== undefined, maxPages }, "explore dry run");
+      const specs = indexSpecs(await loadSpecs(repo.cwd, repo.explore.specGlob), baseUrl);
+      const reader = await openBrowserReader({ storageStatePath });
+      try {
+        const pages = await crawl(reader, { baseUrl, maxPages, ignore: repo.explore.ignorePatterns });
+        const flows = buildFlows(pages, baseUrl, specs, repo.explore.allowMutations);
+        process.stdout.write(renderReport(flows, { baseUrl, pages: pages.length, maxPages }));
+        process.exitCode = flows.some((f) => !f.covered) ? EXIT_OK : EXIT_NONE_ACCEPTED;
+      } finally {
+        await reader.close();
       }
     });
 

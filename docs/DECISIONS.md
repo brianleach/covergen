@@ -398,3 +398,27 @@ is the price of the check. A repo whose suite cannot bear that sets `go.race: fa
 text matching, so a test that names one of those paths in a string it never opens is rejected
 with the rest: the escape hatch is the guard, and `disable_rules` is there for a repo that only
 ever runs on one operating system.
+
+## 22. Explore mode measures flows, not lines, and that costs a browser
+
+2026-09-17
+
+**Context.** Every gate in covergen is built on lcov: a candidate is kept when it strictly raises
+line coverage. A web app behind a login has no such number for the thing that actually breaks,
+which is a user flow, and nothing in the pipeline can see one. Building end to end generation
+means either inventing a coverage signal for flows or not doing it.
+
+**Decision.** A flow is a route plus the interactive elements on it, and it is covered when an
+existing spec navigates to the route and names its elements. That is the measurement; the gate
+keeps its shape, with pass^k against the live target and an action-removal check standing in for
+the mutation spot-check. Reading a live page needs a real browser, so `playwright-core` is a
+regular dependency, the first this repo has taken that is not a small library. Browsers are not
+bundled: the reader resolves one from `PLAYWRIGHT_BROWSERS_PATH` or `COVERGEN_BROWSER_PATH`.
+Both readers, browser and static, feed one hand-rolled parser, so the crawl, the matching, the
+ranking and the report are unit tested with no browser at all. Design in docs/explore-mode.md.
+
+**Consequences.** `npm i -g covergen` now pulls a package built for a browser nobody may have
+installed, for a mode most users will never run. Nothing outside `src/explore*.ts` imports it and
+`explore` is the only command that loads it, so a user who never explores pays install size and
+nothing else. The flow model is coarser than lcov on purpose and will call some covered routes
+uncovered, which costs a duplicate spec rather than a false acceptance.
