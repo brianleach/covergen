@@ -136,13 +136,13 @@ export function mutationShortfall(
   minRatio: number,
   allowNoMutants = false,
 ): string | undefined {
-  if (summary.tried === 0) return allowNoMutants ? undefined : "no applicable mutants";
+  if (summary.tried === 0) return allowNoMutants ? undefined : "no bug could be planted";
   if (summary.killed < Math.min(minKilled, summary.tried)) {
-    return `killed ${summary.killed} of ${summary.tried} mutants, need at least ${Math.min(minKilled, summary.tried)}`;
+    return `caught ${summary.killed} of ${summary.tried} planted bugs, need at least ${Math.min(minKilled, summary.tried)}`;
   }
   const ratio = summary.killed / summary.tried;
   if (minRatio > 0 && ratio < minRatio) {
-    return `killed ${summary.killed} of ${summary.tried} mutants (${(ratio * 100).toFixed(0)}%), need ${(minRatio * 100).toFixed(0)}%`;
+    return `caught ${summary.killed} of ${summary.tried} planted bugs (${(ratio * 100).toFixed(0)}%), need ${(minRatio * 100).toFixed(0)}%`;
   }
   return undefined;
 }
@@ -174,7 +174,7 @@ export interface EvaluateArgs {
   mutation?: {
     enabled: boolean;
     maxMutants: number;
-    /** Absolute floor: fewer mutants killed than this rejects the candidate. */
+    /** Absolute floor: catching fewer planted bugs than this rejects the candidate. */
     minKilled: number;
     /** Share of the mutants tried that must be killed, 0 to 1. Defaults to 0 (floor only). */
     minKilledRatio?: number;
@@ -375,7 +375,7 @@ export async function evaluate(args: EvaluateArgs): Promise<GateResult> {
         runs,
         delta,
         mutation: summary,
-        error: `${shortfall}. The test still passed with these mutations applied:\n${list}`,
+        error: `${shortfall}. The test still passed with these bugs planted:\n${list}`,
       };
     }
     return { status: "accepted", runs, delta, mutation: summary };

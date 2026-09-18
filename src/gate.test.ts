@@ -587,7 +587,7 @@ describe("evaluate mutation spot-check", () => {
     expect(result.delta?.newlyCovered).toEqual([2]);
     expect(result.mutation).toMatchObject({ tried: 2, killed: 0 });
     expect(result.mutation?.survivors.map((s) => s.id)).toEqual(["m2-relational", "m2-condition"]);
-    expect(result.error).toContain("killed 0 of 2 mutants");
+    expect(result.error).toContain("caught 0 of 2 planted bugs");
     expect(result.error).toContain("line 2: relational: == to !=");
     expect(result.error).toContain("line 2: condition: if to unless");
     expect(readFileSync(join(tmp, SOURCE), "utf8")).toBe(MUTABLE);
@@ -601,7 +601,7 @@ describe("evaluate mutation spot-check", () => {
 
     expect(result.status).toBe("weak_assertions");
     expect(result.mutation).toEqual({ tried: 0, killed: 0, survivors: [] });
-    expect(result.error).toContain("no applicable mutants");
+    expect(result.error).toContain("no bug could be planted");
     expect(result.error).toContain(`lines 2 of ${SOURCE}`);
     expect(result.delta?.newlyCovered).toEqual([2]);
     // Nothing was mutated, so the only run is the candidate's own.
@@ -646,7 +646,7 @@ describe("evaluate mutation spot-check", () => {
     const result = await evaluate(args({ runner, mutation: { ...on, maxMutants: 1 } }));
 
     expect(result.status).toBe("weak_assertions");
-    expect(result.error).toContain("no applicable mutants");
+    expect(result.error).toContain("no bug could be planted");
     expect(result.mutation).toEqual({ tried: 0, killed: 0, survivors: [] });
     // maxMutants 1, so at most 3 attempts, and the source offers 3 mutants for line 2.
     expect(runner.calls.length).toBeLessThanOrEqual(1 + MUTANT_ATTEMPT_FACTOR);
@@ -704,7 +704,7 @@ describe("evaluate mutation spot-check", () => {
     const result = await evaluate(args({ runner, mutation: { ...on, minKilledRatio: 0.6 } }));
 
     expect(result.status).toBe("weak_assertions");
-    expect(result.error).toContain("killed 1 of 2 mutants (50%), need 60%");
+    expect(result.error).toContain("caught 1 of 2 planted bugs (50%), need 60%");
     expect(result.error).toContain("line 2: condition: if to unless");
   });
 });
@@ -712,8 +712,8 @@ describe("evaluate mutation spot-check", () => {
 describe("mutationShortfall", () => {
   const summary = (tried: number, killed: number) => ({ tried, killed, survivors: [] });
 
-  it("calls no applicable mutant a shortfall, unless the repo allows it", () => {
-    expect(mutationShortfall(summary(0, 0), 2, 0.6)).toBe("no applicable mutants");
+  it("calls no bug that could be planted a shortfall, unless the repo allows it", () => {
+    expect(mutationShortfall(summary(0, 0), 2, 0.6)).toBe("no bug could be planted");
     expect(mutationShortfall(summary(0, 0), 2, 0.6, true)).toBeUndefined();
   });
 

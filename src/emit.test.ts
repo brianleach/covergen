@@ -245,17 +245,17 @@ describe("prBody", () => {
   it("leads with the mutation score, above the coverage table", () => {
     const accepted = [candidate({ mutation: { tried: 4, killed: 3, survivors: [] } })];
     const body = prBody(summary({ accepted }));
-    expect(body).toContain("Tests that catch regressions: 3 of 4 mutants killed (75%).");
+    expect(body).toContain("Tests that catch regressions: caught 3 of 4 planted bugs (75%).");
     expect(body.indexOf("Tests that catch regressions")).toBeLessThan(body.indexOf("## Accepted tests"));
   });
 
   it("says so rather than inventing a score when nothing was mutated", () => {
-    expect(prBody(summary())).toContain("no mutants applied to the covered lines");
+    expect(prBody(summary())).toContain("no bug could be planted on the covered lines");
   });
 
   it("names the assertions each accepted test uses", () => {
     const body = prBody(summary());
-    expect(body).toContain("| Mutants killed | Assertions |");
+    expect(body).toContain("| Planted bugs caught | Assertions |");
     expect(body).toContain("| n/a | eq |");
   });
 
@@ -263,7 +263,7 @@ describe("prBody", () => {
     const rejected = [
       candidate({
         status: "weak_assertions",
-        lastError: "killed 1 of 3 mutants (33%), need 60%",
+        lastError: "caught 1 of 3 planted bugs (33%), need 60%",
         mutation: { tried: 3, killed: 1, survivors: [{ id: "m4-relational", line: 4, description: "relational: > to >=" }] },
       }),
     ];
@@ -278,7 +278,7 @@ describe("prBody", () => {
 
   it("renders a table row per accepted test with symbol, lines and percentages", () => {
     const body = prBody(summary());
-    expect(body).toContain("| Spec | Symbol | Lines newly covered | Before | After | Mutants killed |");
+    expect(body).toContain("| Spec | Symbol | Lines newly covered | Before | After | Planted bugs caught |");
     expect(body).toContain("`spec/services/foo_spec.rb`");
     expect(body).toContain("`Foo#call`");
     expect(body).toContain("2 (11, 12)");
@@ -298,10 +298,10 @@ describe("prBody", () => {
   });
 
   it("renders the weak_assertions status as words", () => {
-    const rejected = [candidate({ status: "weak_assertions", lastError: "killed 0 of 3 mutants" })];
+    const rejected = [candidate({ status: "weak_assertions", lastError: "caught 0 of 3 planted bugs" })];
     const body = prBody(summary({ accepted: [], candidates: rejected }));
     expect(body).toContain("- **weak assertions** (1)");
-    expect(body).toContain("killed 0 of 3 mutants");
+    expect(body).toContain("caught 0 of 3 planted bugs");
   });
 
   it("groups rejected candidates by status with counts", () => {

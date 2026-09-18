@@ -181,11 +181,12 @@ export function specQuality(candidates: Candidate[]): SpecQuality[] {
   }));
 }
 
-/** "7 of 9 mutants killed (78%)", or the reason there is no figure. */
+/** "caught 7 of 9 planted bugs (78%)", or the reason there is no figure. */
 export function mutationLine(score: MutationScore): string {
-  if (score.tried === 0) return "Tests that catch regressions: no mutants applied to the covered lines, so nothing was measured.";
+  if (score.tried === 0)
+    return "Tests that catch regressions: no bug could be planted on the covered lines, so nothing was measured.";
   const percent = ((score.killed / score.tried) * 100).toFixed(0);
-  return `Tests that catch regressions: ${score.killed} of ${score.tried} mutants killed (${percent}%).`;
+  return `Tests that catch regressions: caught ${score.killed} of ${score.tried} planted bugs (${percent}%).`;
 }
 
 function assertionsCell(kinds: string[]): string {
@@ -267,7 +268,7 @@ export function prBody(summary: RunSummary): string {
   if (accepted.length === 0) {
     out.push("None. No candidate both passed repeatedly and raised line coverage.");
   } else {
-    out.push("| Spec | Symbol | Lines newly covered | Before | After | Mutants killed | Assertions |");
+    out.push("| Spec | Symbol | Lines newly covered | Before | After | Planted bugs caught | Assertions |");
     out.push("| --- | --- | --- | --- | --- | --- | --- |");
     for (const c of accepted) {
       const symbol = c.segment.symbol ?? `${c.segment.path}:${c.segment.startLine}`;
