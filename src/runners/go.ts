@@ -14,7 +14,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import type { GoOptions, PreflightOptions, RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
+import type { GoOptions, PreflightOptions, RepoConfig, RunOptions, RunResult, Runner, TestCase } from "../types.js";
+import { casesIn, goCases } from "./cases.js";
 import { coverageOutDir, runCommand, withPrefix, type ExecFn } from "./exec.js";
 
 const DEFAULTS: GoOptions = { command: ["go", "test"], packages: ["./..."], race: true };
@@ -213,6 +214,9 @@ export function createGoRunner(exec: ExecFn = runCommand): Runner {
       // -count=1 defeats the test cache: without it the repeat runs behind pass^k
       // and every mutant re-run would replay the first result.
       const args = [...command, "-count=1"];
+      // A Go test name is an identifier, so anchoring it needs no escaping and
+      // `-run ^Name$` cannot also select TestNameExtended.
+      if (opts.caseFilter) args.push("-run", `^${opts.caseFilter}$`);
       // -race on the gate runs only. The detector is the one check that sees a
       // data race, which pass^k never can: k runs on one idle machine all pass and
       // the same test fails in the repo's CI. Baselines skip it, because they are
@@ -265,6 +269,10 @@ export function createGoRunner(exec: ExecFn = runCommand): Runner {
       return [`${specPath} is not gofmt formatted. Return it formatted exactly as gofmt would write it:`, diff.stdout.trim().split("\n").slice(0, 60).join("\n")]
         .filter((s) => s.length > 0)
         .join("\n");
+    },
+
+    async listCases(repo: RepoConfig, specPath: string): Promise<TestCase[]> {
+      return casesIn(repo, specPath, goCases);
     },
 
     specPathFor(repo: RepoConfig, relSource: string): string {

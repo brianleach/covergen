@@ -173,6 +173,21 @@ export interface RunOptions {
    * which is the only way the gate sees a data race at all.
    */
   gate?: boolean;
+  /**
+   * Run one named test case out of `files` instead of all of them, which is what
+   * the audit needs to attribute coverage and wall time to a single case. Each
+   * runner translates it into its own name filter. A runner with no such filter
+   * ignores it, and the caller falls back to whole-file granularity.
+   */
+  caseFilter?: string;
+}
+
+/** One test case inside a spec file, as a runner's case lister sees it. */
+export interface TestCase {
+  /** The name, spelled exactly as this runner's name filter has to match it. */
+  name: string;
+  /** 1-based line where the case opens. */
+  line: number;
 }
 
 export interface RunResult {
@@ -219,6 +234,12 @@ export interface Runner {
    */
   checkSpec?(repo: RepoConfig, specPath: string): Promise<string | undefined>;
   run(repo: RepoConfig, opts: RunOptions): Promise<RunResult>;
+  /**
+   * The test cases one spec file declares, for the audit. Absent means this
+   * runner cannot name a single case, so the audit judges the file as a whole
+   * and says so in the report.
+   */
+  listCases?(repo: RepoConfig, specPath: string): Promise<TestCase[]>;
   /** File extension and naming for a new spec next to `relSource`. */
   specPathFor(repo: RepoConfig, relSource: string): string;
 }
