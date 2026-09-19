@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { EXIT_ABORTED } from "./abort.js";
+import { auditMarkdown, runAudit, writeAudit, writeAuditJson } from "./audit.js";
 import { claudeExec, preflightClaudeCode } from "./claude-code.js";
 import { findRepo, generatorBackend, loadConfig, type Config } from "./config.js";
 import { buildFlows, crawl, exploreEnv, renderReport } from "./explore.js";
@@ -311,6 +312,35 @@ export function buildProgram(): Command {
       } finally {
         await reader.close();
       }
+    });
+
+  program
+    .command("audit")
+    .description("Judge the tests this repo already has: which ones run code without checking it, and what they cost")
+    .requiredOption("--repo <name>", "repo name from covergen.yaml")
+    .option("--limit <n>", "audit at most this many spec files, cheapest-value first", "0")
+    .option("--report <path>", "write the JSON report to this path")
+    .option("--deep", "plant bugs against every case, not only the ones the static pass flagged", false)
+    .action(async (opts: { repo: string; limit: string; report?: string; deep: boolean }) => {
+      const { config, log } = context(program);
+      const repo = findRepo(config, opts.repo);
+      const parsed = Number.parseInt(opts.limit, 10);
+      const report = await runAudit({
+        config,
+        repo,
+        log,
+        deep: opts.deep,
+        limit: Number.isFinite(parsed) && parsed > 0 ? parsed : 0,
+        limits: createLimits({ maxMinutes: config.sweep.max_minutes }),
+      });
+      const markdown = auditMarkdown(report);
+      const path = await writeAudit(config, repo, markdown);
+      if (opts.report) await writeAuditJson(opts.report, report);
+      process.stdout.write(markdown);
+      process.stdout.write(`\nWritten to ${path}\n`);
+      // Nothing flagged is the good outcome and still not a finding, so it takes
+      // the same exit code an empty run does.
+      process.exitCode = report.totals.cases > report.totals.keeps ? EXIT_OK : EXIT_NONE_ACCEPTED;
     });
 
   program

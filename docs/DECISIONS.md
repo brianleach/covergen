@@ -422,3 +422,30 @@ installed, for a mode most users will never run. Nothing outside `src/explore*.t
 `explore` is the only command that loads it, so a user who never explores pays install size and
 nothing else. The flow model is coarser than lcov on purpose and will call some covered routes
 uncovered, which costs a duplicate spec rather than a false acceptance.
+
+## 23. Existing tests face the same gate as generated ones
+
+2026-09-16
+
+**Context.** An owner principle, stated plainly: the job is high-quality coverage, not a high
+coverage number, and squashing test runs that cost CI time without catching anything is part of
+that job. Every bar this tool has, the assertion rules and the planted-bug spot-check, applied
+only to tests covergen wrote itself. Tests that were already in the tree were exempt from all of
+it, which is backwards: they are the ones nobody has looked at in a year, they are most of the
+suite, and decision 18 says a test that runs the code without checking it is worse than none
+whoever wrote it.
+
+**Decision.** `covergen audit` runs the same judgment over the tests a repo already has. The unit
+is the test case, not the file. The static pass is the rules registry unchanged. The dynamic pass
+is the spot-check unchanged: plant bugs on the lines one case covers, re-run the case, and see
+whether it notices. Nothing is deleted, edited, or proposed for deletion here; the command writes
+a ranked report and stops, so the removal decision stays with a human reading a diff. The dynamic
+pass is bounded to the spec files the static pass already flagged, because mutation testing a
+whole suite is an overnight job and the point is a report someone reads tomorrow.
+
+**Consequences.** Runners need one new capability, naming a single test case, and four of the
+seven have it; the rest are audited a file at a time and the report says which. A case the audit
+flags is a finding, not a verdict: the removal proposal is a separate step, reviewed on its own.
+The redundancy measure subtracts a whole spec file from the suite's coverage rather than one case,
+so it under-reports redundancy, which is the safe direction for anything that leads to deleting a
+test.

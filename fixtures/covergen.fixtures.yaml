@@ -59,3 +59,16 @@ repos:
     runner: cargo
     # lib.rs is only a module declaration, so rates.rs is the only real target.
     sources: ["src/**/*.rs"]
+  # The audit fixtures. Unlike the others, these ship deliberately bad tests:
+  # one case of every shape `covergen audit` has a verdict for.
+  - name: audit-vitest
+    root: ..
+    cwd: fixtures/audit-vitest
+    runner: vitest
+    sources: ["src/**/*.ts"]
+  - name: audit-go
+    root: ..
+    cwd: fixtures/audit-go
+    runner: go
+    sources: ["**/*.go"]
+    exclude: ["**/*_test.go"]
