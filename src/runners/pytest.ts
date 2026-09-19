@@ -13,7 +13,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { glob, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { PreflightOptions, PytestOptions, RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
+import type { PreflightOptions, PytestOptions, RepoConfig, RunOptions, RunResult, Runner, TestCase } from "../types.js";
+import { casesIn, pytestCases } from "./cases.js";
 import { coverageOutDir, resolveLcov, runCommand, withPrefix, type ExecFn } from "./exec.js";
 
 const DEFAULTS: PytestOptions = { command: ["python", "-m", "pytest"], testGlob: "tests/**/test_*.py" };
@@ -130,6 +131,9 @@ export function createPytestRunner(exec: ExecFn = runCommand): Runner {
     async run(repo: RepoConfig, opts: RunOptions): Promise<RunResult> {
       const { command, cov } = pytestSettings(repo);
       const args = [...command, ...opts.files, "-q", "-p", "no:cacheprovider"];
+      // -k rather than a node id: the file is already in `files`, and a node id
+      // would have to spell the class path of a method-shaped test as well.
+      if (opts.caseFilter) args.push("-k", opts.caseFilter);
       let lcovTarget: string | undefined;
       let env: Record<string, string> = { ...opts.env, ...NO_BYTECODE };
       if (opts.coverage) {
@@ -150,6 +154,10 @@ export function createPytestRunner(exec: ExecFn = runCommand): Runner {
       }
 
       return { ok: res.exitCode === 0, exitCode: res.exitCode, stdout: res.stdout, stderr, durationMs: res.durationMs, lcovPath };
+    },
+
+    async listCases(repo: RepoConfig, specPath: string): Promise<TestCase[]> {
+      return casesIn(repo, specPath, pytestCases);
     },
 
     specPathFor(repo: RepoConfig, relSource: string): string {

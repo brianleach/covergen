@@ -6,7 +6,8 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
+import type { RepoConfig, RunOptions, RunResult, Runner, TestCase } from "../types.js";
+import { casesIn, jsCases } from "./cases.js";
 import { coverageOutDir, resolveLcov, runCommand, withPrefix, type ExecFn } from "./exec.js";
 import { escapeGlob } from "./glob.js";
 
@@ -30,10 +31,15 @@ export function createJestRunner(exec: ExecFn = runCommand): Runner {
       );
     },
 
+    async listCases(repo: RepoConfig, specPath: string): Promise<TestCase[]> {
+      return casesIn(repo, specPath, jsCases);
+    },
+
     async run(repo: RepoConfig, opts: RunOptions): Promise<RunResult> {
       // Positional args are regexes to Jest, so a path like src/app/(app)/x.test.tsx
       // matches nothing. --runTestsByPath makes them literal paths.
       const args = ["npx", "jest", ...(opts.files.length > 0 ? ["--runTestsByPath", ...opts.files] : [])];
+      if (opts.caseFilter) args.push("-t", opts.caseFilter);
 
       let lcovTarget: string | undefined;
       if (opts.coverage) {

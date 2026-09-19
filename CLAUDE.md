@@ -41,6 +41,7 @@ cli: covergen run --repo X --file path   |   covergen sweep --repo X --changed-s
 | `src/segments.ts` | Cluster uncovered lines into prompt-sized segments |
 | `src/runners/index.ts` | `getRunner(name)` |
 | `src/runners/{rspec,vitest,bun,jest,pytest,go,cargo}.ts` | One `Runner` per test runner, all emit lcov (the go runner converts Go's block profile itself, and the cargo runner drives cargo-llvm-cov and strips `#[cfg(test)]` lines out of the result) |
+| `src/runners/cases.ts` | Listing the test cases in one spec file, per language, for the audit |
 | `src/prompt.ts` | Prompt block assembly, idiom pack loader, rules list |
 | `src/generate.ts` | Anthropic calls with prompt caching, candidate parsing, dedup |
 | `src/gate.ts` | Scratch splice, pass^k, coverage delta, mutation spot-check, verdict |

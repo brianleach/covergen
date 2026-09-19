@@ -6,7 +6,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
+import type { RepoConfig, RunOptions, RunResult, Runner, TestCase } from "../types.js";
+import { casesIn, jsCases } from "./cases.js";
 import { coverageOutDir, resolveLcov, runCommand, withPrefix, type ExecFn } from "./exec.js";
 import { escapeGlob } from "./glob.js";
 
@@ -98,8 +99,15 @@ export function createVitestRunner(exec: ExecFn = runCommand): Runner {
       return component ? [component] : [];
     },
 
+    async listCases(repo: RepoConfig, specPath: string): Promise<TestCase[]> {
+      return casesIn(repo, specPath, jsCases);
+    },
+
     async run(repo: RepoConfig, opts: RunOptions): Promise<RunResult> {
       const args = ["npx", "vitest", "run", ...opts.files];
+      // -t matches against the full name, so the `it` name alone selects the case
+      // whatever describe blocks it sits in.
+      if (opts.caseFilter) args.push("-t", opts.caseFilter);
 
       let lcovTarget: string | undefined;
       if (opts.coverage) {
