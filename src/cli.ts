@@ -24,6 +24,7 @@ import { createLimits, parseCeiling, totalTokens } from "./limits.js";
 import { createLogger, type Logger } from "./logger.js";
 import { mutationScore, prBody } from "./emit.js";
 import { runPipeline } from "./pipeline.js";
+import { runRemoval } from "./removal.js";
 import { reportLines, runFields, sweepAll, sweepTargets, writeReport } from "./sweep.js";
 import { getRunner } from "./runners/index.js";
 import { rankByValue, valueTable } from "./value.js";
@@ -321,7 +322,9 @@ export function buildProgram(): Command {
     .option("--limit <n>", "audit at most this many spec files, cheapest-value first", "0")
     .option("--report <path>", "write the JSON report to this path")
     .option("--deep", "plant bugs against every case, not only the ones the static pass flagged", false)
-    .action(async (opts: { repo: string; limit: string; report?: string; deep: boolean }) => {
+    .option("--pr", "open a draft PR proposing the removal of the cases that catch nothing and cover nothing unique", false)
+    .option("--min-savings-ms <n>", "leave a case alone unless cutting it gives back at least this many ms per run", "0")
+    .action(async (opts: { repo: string; limit: string; report?: string; deep: boolean; pr: boolean; minSavingsMs: string }) => {
       const { config, log } = context(program);
       const repo = findRepo(config, opts.repo);
       const parsed = Number.parseInt(opts.limit, 10);
@@ -338,6 +341,12 @@ export function buildProgram(): Command {
       if (opts.report) await writeAuditJson(opts.report, report);
       process.stdout.write(markdown);
       process.stdout.write(`\nWritten to ${path}\n`);
+      if (opts.pr) {
+        const savings = Number.parseInt(opts.minSavingsMs, 10);
+        const outcome = await runRemoval({ config, repo, log, report, minSavingsMs: Number.isFinite(savings) && savings > 0 ? savings : 0 });
+        const said = outcome.status === "opened" ? outcome.urls.join(", ") : (outcome.reason ?? outcome.status);
+        process.stdout.write(`Removal PR: ${said}\n`);
+      }
       // Nothing flagged is the good outcome and still not a finding, so it takes
       // the same exit code an empty run does.
       process.exitCode = report.totals.cases > report.totals.keeps ? EXIT_OK : EXIT_NONE_ACCEPTED;

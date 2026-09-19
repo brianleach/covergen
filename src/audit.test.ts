@@ -124,7 +124,7 @@ describe("the report", () => {
       durationMs: 10_000,
       deep: false,
       totals: totalsOf(cases),
-      repos: [{ repo: "audit-vitest", runner: "vitest", granularity: "case", specs: 1, auditedCases: cases, slowestSpecs: [{ spec: "src/rates.test.ts", cases: 3, durationMs: 900 }] }],
+      repos: [{ repo: "audit-vitest", runner: "vitest", granularity: "case", specs: 1, suiteLines: 7, auditedCases: cases, slowestSpecs: [{ spec: "src/rates.test.ts", cases: 3, durationMs: 900 }] }],
     });
     expect(markdown).toContain("2 cases run code without checking it, 1 of them cover nothing the rest of the suite does not, and together they cost 0.5 seconds per run.");
     expect(markdown).toContain("| weak_dynamic, redundant | src/rates.test.ts:2 | leaves its arguments alone | 0/2 | 0/3 |");

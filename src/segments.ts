@@ -80,12 +80,10 @@ function clusterLines(lines: number[]): Cluster[] {
 const RUBY_DEF = /^[ \t]*def\s+([A-Za-z_][\w]*[?!=]?|self\.[A-Za-z_][\w]*[?!=]?|\[\]=?|[<>=+\-*/%!~^&|]+)/;
 const RUBY_TYPE = /^[ \t]*(class|module)\s+([A-Za-z_][\w:]*)/;
 
-function rubyBlockAt(lines: string[], index: number): Block | undefined {
+/** The `end` closing the block that opens at `index`, matched on the opener's indent. */
+function rubyEndAt(lines: readonly string[], index: number): number | undefined {
   const line = lines[index];
   if (line === undefined) return undefined;
-  const def = RUBY_DEF.exec(line);
-  const type = def ? undefined : RUBY_TYPE.exec(line);
-  if (!def && !type) return undefined;
   const indent = indentOf(line);
   for (let i = index + 1; i < lines.length; i += 1) {
     const candidate = lines[i];
@@ -93,9 +91,19 @@ function rubyBlockAt(lines: string[], index: number): Block | undefined {
     const trimmed = candidate.trim();
     if (trimmed !== "end" && !trimmed.startsWith("end ") && !trimmed.startsWith("end;")) continue;
     if (indentOf(candidate) !== indent) continue;
-    return { start: index + 1, end: i + 1, symbol: def ? def[1] : type?.[2] };
+    return i + 1;
   }
   return undefined;
+}
+
+function rubyBlockAt(lines: string[], index: number): Block | undefined {
+  const line = lines[index];
+  if (line === undefined) return undefined;
+  const def = RUBY_DEF.exec(line);
+  const type = def ? undefined : RUBY_TYPE.exec(line);
+  if (!def && !type) return undefined;
+  const end = rubyEndAt(lines, index);
+  return end === undefined ? undefined : { start: index + 1, end, symbol: def ? def[1] : type?.[2] };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,12 +176,8 @@ function countBraces(line: string): number {
   return depth;
 }
 
-function braceBlockAt(lines: string[], index: number): Block | undefined {
-  const declLine = lines[index];
-  if (declLine === undefined) return undefined;
-  const symbol = braceDeclName(declLine);
-  if (symbol === undefined) return undefined;
-
+/** The line where brace depth opened at `index` returns to zero. */
+function braceEndAt(lines: readonly string[], index: number): number | undefined {
   let depth = 0;
   let opened = false;
   for (let i = index; i < lines.length; i += 1) {
@@ -183,11 +187,35 @@ function braceBlockAt(lines: string[], index: number): Block | undefined {
     if (!opened && delta <= 0 && i > index + 2) return undefined; // no body found nearby
     depth += delta;
     if (depth > 0) opened = true;
-    if (opened && depth <= 0) {
-      return { start: index + 1, end: i + 1, symbol: symbol === "(anonymous)" ? undefined : symbol };
-    }
+    if (opened && depth <= 0) return i + 1;
   }
   return undefined;
+}
+
+function braceBlockAt(lines: string[], index: number): Block | undefined {
+  const declLine = lines[index];
+  if (declLine === undefined) return undefined;
+  const symbol = braceDeclName(declLine);
+  if (symbol === undefined) return undefined;
+  const end = braceEndAt(lines, index);
+  return end === undefined ? undefined : { start: index + 1, end, symbol: symbol === "(anonymous)" ? undefined : symbol };
+}
+
+/**
+ * The 1-based span of the block opening on `line`, closed the way this file
+ * closes any other: braces back to zero, or the Ruby `end` at the opener's
+ * indent. The segment extractor asks what the opener declares first, and this
+ * does not, because a test case opens with a call (`it`, `describe`, `func
+ * TestX`) rather than a declaration. Go is read as a brace language here even
+ * though the extractor does not read it yet, because the audit lists Go cases.
+ */
+export function blockSpanAt(path: string, lines: readonly string[], line: number): { start: number; end: number } | undefined {
+  const index = line - 1;
+  if (index < 0 || index >= lines.length) return undefined;
+  const known = languageFor(path);
+  const language = known === "unknown" && /\.go$/i.test(path) ? "brace" : known;
+  const end = language === "ruby" ? rubyEndAt(lines, index) : language === "brace" ? braceEndAt(lines, index) : undefined;
+  return end === undefined ? undefined : { start: line, end };
 }
 
 // ---------------------------------------------------------------------------
