@@ -264,7 +264,9 @@ Defaults per runner:
 
 ### The mutation block
 
-Once a candidate has passed pass^k, gained coverage, lost nothing, and passed
+This step is mutation testing: covergen plants small, deliberate bugs in the
+lines the candidate covers and checks that the test notices. Once a candidate
+has passed pass^k, gained coverage, lost nothing, and passed
 `validate`, covergen edits the source lines the candidate newly covered, one
 edit per mutant, up to `mutation.max_mutants`. The operators are relational,
 boolean, logical, condition, numeric, return and predicate, applied to `.rb`,
@@ -297,9 +299,9 @@ compiler rejects is not a result, so it does not consume a slot: covergen keeps
 producing mutants until `max_mutants` of them actually ran or the operators run
 out of edits for those lines, bounded by a hard cap of `3 x max_mutants`
 attempts. If nothing applicable is left after that, the spot-check reports
-`tried: 0` and the candidate is rejected as `weak_assertions` with "no applicable
-mutants" rather than accepted on coverage alone: nothing on the lines it covered
-can be broken in a way the test could notice, which is the outcome the
+`tried: 0` and the candidate is rejected as `weak_assertions` with "no bug could
+be planted" rather than accepted on coverage alone: nothing on the lines it
+covered can be broken in a way the test could notice, which is the outcome the
 spot-check exists to catch. A repo of declaration-shaped files where that is
 normal sets `allow_no_mutants: true` on its entry to accept them instead.
 
@@ -515,7 +517,7 @@ above the coverage numbers, because a test that raises coverage without noticing
 a broken line is the thing this tool exists to avoid:
 
 ```
-Tests that catch regressions: 7 of 9 mutants killed (78%).
+Tests that catch regressions: caught 7 of 9 planted bugs (78%).
 ```
 
 The accepted-tests table has these columns:
@@ -527,7 +529,7 @@ The accepted-tests table has these columns:
 | Lines newly covered | How many source lines went from zero hits to nonzero, with the first eight line numbers |
 | Before | Line coverage of the source file before the test |
 | After | Before plus the measured gain |
-| Mutants killed | `killed/tried`, or `n/a` when the spot-check was off or no operator applied |
+| Planted bugs caught | `killed/tried`, or `n/a` when the spot-check was off or no operator applied |
 | Assertions | The matcher names the test uses, so a row of `toBeDefined` is visible without opening the file |
 
 Rejected candidates are grouped by status, largest group first, each entry
@@ -560,7 +562,7 @@ any of them off with `disable_rules`.
 | `test_failed` | Ran and failed, after its repair rounds |
 | `flaky` | Passed at least once but not `gate.k` times in a row |
 | `no_coverage_gain` | Covered no new line, or lost one another spec had |
-| `weak_assertions` | Kept passing while the lines it covers were broken, missing `mutation.min_killed` or `mutation.min_killed_ratio`, or covered only lines no operator could break at all ("no applicable mutants", unless the entry sets `allow_no_mutants`) |
+| `weak_assertions` | Kept passing while the lines it covers were broken, missing `mutation.min_killed` or `mutation.min_killed_ratio`, or covered only lines no operator could break at all ("no bug could be planted", unless the entry sets `allow_no_mutants`) |
 
 The rejection that matters most is the last one. A test that raises coverage
 without noticing a broken line is worse than no test: it costs a review, it costs
@@ -579,7 +581,7 @@ a CI slot on every run forever, and it reports confidence that is not there.
 | `tautological` | Every assertion is a weak matcher: `toBeDefined`, `toBeTruthy`, `not.toThrow`, a snapshot, a value compared to itself | Assert the value the code returns. `toBeFalsy`, `toBeNull` and `be_nil` are not weak and are never rejected for it |
 | `declaration_snapshot` | Never called the code under test with an input, so it pins a declaration rather than behavior | Call one exported function with a real argument. Both verdicts share one repair round with `weak_assertions` |
 | `os_specific` | Reaches for something only one operating system has, with no platform guard that skips | Use the portable equivalent (`t.TempDir()` for files), or guard it with `if runtime.GOOS != "linux" { t.Skip(...) }` |
-| `weak_assertions` | Passed and gained coverage but missed the mutation floor or ratio | The test runs the code without asserting on it. The PR body names the mutants it let through |
+| `weak_assertions` | Passed and gained coverage but missed the mutation floor or ratio | The test runs the code without asserting on it. The PR body names the planted bugs it let through |
 | `accepted` | Passed everything and was written into the spec file | Review it like any other code |
 | `frozen` | The same test text was already tried in an earlier run, or is already accepted | Nothing. Frozen hashes are skipped so no tokens are spent on them |
 
@@ -868,8 +870,8 @@ What to do with the branch it leaves:
 ## What covergen optimizes for
 
 Coverage is the instrument, not the goal. The goal is a suite that fails when the
-code breaks, so covergen would rather add five tests that kill mutants than fifty
-that pad a percentage. That principle decides what it aims at. Targets are ranked
+code breaks, so covergen would rather add five tests that catch planted bugs
+than fifty that pad a percentage. That principle decides what it aims at. Targets are ranked
 by `--order value`:
 
 ```
@@ -893,7 +895,7 @@ hole really is the point. Reasoning: decision 19 in
 
 A candidate test is kept only if it builds, passes `gate.k` times in a row,
 covers at least one line that was uncovered before, loses none, passes every
-`validate` command, and kills both `mutation.min_killed` mutants and
+`validate` command, and catches both `mutation.min_killed` planted bugs and
 `mutation.min_killed_ratio` of the ones tried when the spot-check produced any. Rules in `src/rules.ts` reject sleeps, real network,
 real clocks, skipped tests, tautologies, snapshot-only tests, and tests with no
 assertion at all, before the gate runs. Failures get up to `max_repair_rounds`

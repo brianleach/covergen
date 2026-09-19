@@ -341,7 +341,7 @@ export function reportLines(report: SweepReport): string {
   }
   const score = report.mutation;
   if (score.tried > 0) {
-    out.push(`  mutants killed ${score.killed}/${score.tried} (${((score.killed / score.tried) * 100).toFixed(0)}%)`);
+    out.push(`  planted bugs caught ${score.killed}/${score.tried} (${((score.killed / score.tried) * 100).toFixed(0)}%)`);
   }
   const note = limitNote(report.ceilingHit as "tokens" | "minutes" | undefined);
   if (note) out.push(note);

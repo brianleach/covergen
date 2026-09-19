@@ -117,9 +117,9 @@ candidate still in the file: typecheck, lint, whatever the repo's CI runs. A non
 The mutation spot-check is last, because it is the most expensive. `src/mutate.ts` makes small
 single-line edits to the lines the candidate newly covered, capped at `mutation.max_mutants` (default 5).
 Operators run in a fixed order per line: relational, boolean, logical, condition, numeric, return,
-predicate. String literals and comments are masked first, so a mutant never rewrites a message. Each
-mutant is written to the source file and the spec re-run; a failing run means the mutant was killed, the
-outcome we want. A candidate killing fewer than `min_killed` is `weak_assertions`. Zero mutants generated
+predicate. String literals and comments are masked first, so a planted bug never rewrites a message. Each
+planted bug is written to the source file and the spec re-run; a failing run means the test caught it, the
+outcome we want. A candidate that catches fewer than `min_killed` is `weak_assertions`. Zero bugs generated
 means the check is skipped, not failed. The source file is restored in an inner `finally`, before the
 outer one restores the spec.
 

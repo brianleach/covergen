@@ -207,7 +207,7 @@ describe("sweepAll", () => {
     const config = await workspace();
     const report = await sweepAll(args(config));
 
-    // Two repos ran with one accepted test each, 3 of 4 mutants killed apiece.
+    // Two repos ran with one accepted test each, 3 of 4 planted bugs caught apiece.
     expect(report.mutation).toEqual({ killed: 6, tried: 8, score: 0.75 });
     expect(report.repos[0]?.mutation).toEqual({ killed: 3, tried: 4, score: 0.75 });
     expect(report.repos[0]?.acceptedSpecs).toEqual([
@@ -222,7 +222,7 @@ describe("sweepAll", () => {
     ]);
     // A repo that never ran reports an empty score rather than a missing field.
     expect(report.repos[2]?.mutation).toEqual({ killed: 0, tried: 0, score: null });
-    expect(reportLines(report)).toContain("mutants killed 6/8 (75%)");
+    expect(reportLines(report)).toContain("planted bugs caught 6/8 (75%)");
   });
 
   it("counts rejected candidates by status, including the assertion verdicts", async () => {
