@@ -81,6 +81,7 @@ covergen sweep     (--repo <name> | --all) [--pr] [--changed-since <ref>] [--lim
                    [--max-tokens <n>] [--max-minutes <n>] [--report <path>] [--refresh-baseline]
 covergen preflight --repo <name> [--deep]
 covergen baseline  --repo <name> [--top <n>]
+covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep]
 ```
 
 `run` generates tests for the source files you name.
@@ -125,9 +126,55 @@ prints the highest-value targets with the components of each score (uncovered
 lines, branch density, churn, importers); `--top <n>` sets how many rows to
 print, default 30.
 
+### audit
+
+`audit` points the same gate at the tests the repo already has. It writes a
+report and changes nothing: no test is edited or deleted, no PR is opened, and no
+model is called.
+
+| Flag | Meaning |
+|---|---|
+| `--repo <name>` | Required. A repo name from covergen.yaml |
+| `--limit <n>` | Audit at most this many spec files, cheapest-value first. `0` (the default) audits every one |
+| `--report <path>` | Write the JSON report to this path. The markdown always goes to `<repo>/.covergen/audit.md` |
+| `--deep` | Plant bugs against every case, not only the ones the static pass flagged |
+
+The unit of judgment is the test case (an `it`/`test` block, a Go `TestXxx`, a
+pytest function), not the file; file totals are derived from it. vitest, jest,
+go and pytest can name a single case, so those four are audited case by case.
+bun, cargo and rspec cannot yet, so for them the spec file is the unit and the
+report says so.
+
+Three passes, cheapest first:
+
+1. **Static**, free, over every case. The rules registry decides: a case with no
+   assertion, only assertions that pass whatever the code did, or only a pinned
+   declaration is flagged.
+2. **Dynamic**, bounded. Every case in a spec file that holds a flagged one runs
+   alone with coverage, bugs are planted on the source lines it covers
+   (`mutation.max_mutants` of them), and the case is re-run against each. `--deep`
+   widens this to every spec file. The whole run stops at `sweep.max_minutes`.
+3. **Cost**, from the wall time those runs already measured, per spec file.
+
+The verdicts:
+
+| Verdict | Means |
+|---|---|
+| `keeps` | Nothing fired. The case caught at least one planted bug, or nothing could be planted and it reads fine |
+| `weak_static` | It runs code and checks nothing: no assertion, a tautology, or a pinned declaration |
+| `weak_dynamic` | Bugs were planted on the lines it covers and it caught none of them |
+| `redundant` | `weak_dynamic`, and every line it covers is covered by something else in the suite too |
+
+A case no bug could be planted against is never judged dynamically, the same way
+the gate's spot-check has no opinion when no operator applies. Redundancy is
+measured by subtracting the whole spec file from the suite's coverage, which
+under-reports rather than over-reports it: a line two spec files both cover
+counts as this file's own.
+
 Exit codes: `0` at least one test was accepted, `2` nothing was accepted (a
 normal outcome, not an error), `1` something broke, `130` a signal stopped the run
-(see "Killing a run"). `preflight` exits `0` on OK and `1` on FAIL. `run` and
+(see "Killing a run"). `preflight` exits `0` on OK and `1` on FAIL. `audit` exits
+`0` when it flagged at least one case and `2` when it flagged none. `run` and
 `sweep` print a PR body to stdout and also write it to
 `<repo>/.covergen/last-run.md`.
 

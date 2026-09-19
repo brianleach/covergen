@@ -2,7 +2,9 @@
 
 One tiny repository per runner covergen claims to support. Each has exactly one
 covered function and one deliberately uncovered one, so a coverage run has a
-known right answer. There is no network access and no install step: every
+known right answer. The two `audit-*` fixtures are the exception: their point is
+the tests rather than the sources, so `covergen audit` has a known right answer
+too. There is no network access and no install step: every
 fixture resolves its runner from this checkout's own `node_modules`, which is
 why `covergen.fixtures.yaml` gives each of them `root: ..` and a `cwd` inside
 `fixtures/`.
@@ -20,6 +22,8 @@ toolchain is not installed is skipped rather than failed.
 | `rspec-min` | rspec | `bundle install` inside the fixture (rspec, simplecov, simplecov-lcov) |
 | `pytest-min` | pytest | `pytest` and `pytest-cov` importable by the interpreter in its `pytest.command` |
 | `go-min` | go | `go` on PATH (1.22 or newer), which brings `gofmt` with it |
+| `audit-vitest` | vitest | `@vitest/coverage-v8` from this repo. Deliberately bad tests: one case of every shape `covergen audit` has a verdict for |
+| `audit-go` | go | `go` on PATH. One `TestXxx` that calls the code and asserts nothing |
 | `rust-min` | cargo | `cargo llvm-cov` on PATH, plus the LLVM tools: `rustup component add llvm-tools-preview`, or `LLVM_COV` and `LLVM_PROFDATA` pointing at the system binaries |
 
 Run one by hand:
