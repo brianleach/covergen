@@ -449,3 +449,14 @@ flags is a finding, not a verdict: the removal proposal is a separate step, revi
 The redundancy measure subtracts a whole spec file from the suite's coverage rather than one case,
 so it under-reports redundancy, which is the safe direction for anything that leads to deleting a
 test.
+
+That separate step is `audit --pr`, and it inherits the same conservatism. It cuts only a case
+that catches nothing and covers nothing of its own, and two rules have no override: a case that
+caught a planted bug is never proposed however redundant it looks, and a case that is some line's
+only coverage is never proposed however little it asserts, because deleting it would lower
+coverage. The second group is listed in the PR as a repair, which is the honest answer for a test
+that guards a line and checks nothing. The cut is textual at the block the case opens on, so a
+runner that cannot name a case gets no proposal at all, and a case this repo's block heuristic
+cannot bound is skipped rather than guessed at. After the cut the suite runs in full with
+coverage, and one lost line puts every file back and opens nothing. The decision itself stays with
+whoever reads the diff: the tool proposes, a human deletes.

@@ -86,6 +86,8 @@ export interface AuditRepoReport {
   /** "case" when the runner can name one case, "spec" when the file is the unit. */
   granularity: "case" | "spec";
   specs: number;
+  /** Source lines the whole suite covers, which is what a removal may not lower. */
+  suiteLines: number;
   auditedCases: AuditedCase[];
   slowestSpecs: SpecCost[];
 }
@@ -357,7 +359,7 @@ export async function runAudit(args: AuditArgs): Promise<AuditReport> {
     deep,
     ceilingHit: args.limits?.hit,
     totals: totalsOf(audited),
-    repos: [{ repo: repo.name, runner: repo.runner, granularity, specs: order.length, auditedCases: audited, slowestSpecs: costs.slice(0, 10) }],
+    repos: [{ repo: repo.name, runner: repo.runner, granularity, specs: order.length, suiteLines: suiteCovered.size, auditedCases: audited, slowestSpecs: costs.slice(0, 10) }],
   };
 }
 
@@ -377,16 +379,23 @@ export function totalsOf(cases: readonly AuditedCase[]): AuditTotals {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** The one sentence a reviewer can act on. Shared with the removal PR body. */
+export function auditLead(report: AuditReport): string {
+  const t = report.totals;
+  const flagged = t.cases - t.keeps;
+  return (
+    `${flagged} ${flagged === 1 ? "case runs" : "cases run"} code without checking it, ${t.redundant} of them cover nothing the rest of the suite does not, ` +
+    `and together they cost ${(t.wastedMs / 1000).toFixed(1)} seconds per run.`
+  );
+}
+
 /** The report, led by the one sentence a reviewer can act on. */
 export function auditMarkdown(report: AuditReport): string {
   const t = report.totals;
-  const flagged = t.cases - t.keeps;
-  const seconds = (t.wastedMs / 1000).toFixed(1);
   const out = [
     "# Test audit",
     "",
-    `${flagged} ${flagged === 1 ? "case runs" : "cases run"} code without checking it, ${t.redundant} of them cover nothing the rest of the suite does not, ` +
-      `and together they cost ${seconds} seconds per run.`,
+    auditLead(report),
     "",
     `${plural(t.cases, "case")} audited, ${t.keeps} kept. Planted bugs caught: ${t.caught}/${t.planted}. Nothing was changed: this report proposes, it does not edit.`,
     "",

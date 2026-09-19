@@ -31,6 +31,25 @@ export interface JournalEntry {
   newlyCovered: number;
 }
 
+/**
+ * One case `audit --pr` cut, with the evidence that allowed the cut and the
+ * span it came out of, which is what rebuilding the PR from a journal needs.
+ */
+export interface RemovalEntry {
+  /** Spec path relative to repo.cwd. */
+  spec: string;
+  case: string;
+  startLine: number;
+  endLine: number;
+  verdict: string;
+  /** Planted bugs this case failed on, over the ones it was re-run against. Always 0 over P. */
+  caught: number;
+  planted: number;
+  /** Lines nothing else covers. Always 0: a case with any is never cut. */
+  uniqueLines: number;
+  durationMs: number;
+}
+
 export interface RunJournal {
   version: number;
   id: string;
@@ -45,6 +64,8 @@ export interface RunJournal {
    */
   baseSha?: string;
   accepted: JournalEntry[];
+  /** Cases `audit --pr` proposed for removal. Empty on a generation run. */
+  removed?: RemovalEntry[];
   /** Why the run ended the way it did, when the status alone does not say it. */
   reason?: string;
   /** Total tokens charged so far, across generator and repairer. */

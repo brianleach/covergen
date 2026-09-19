@@ -81,7 +81,8 @@ covergen sweep     (--repo <name> | --all) [--pr] [--changed-since <ref>] [--lim
                    [--max-tokens <n>] [--max-minutes <n>] [--report <path>] [--refresh-baseline]
 covergen preflight --repo <name> [--deep]
 covergen baseline  --repo <name> [--top <n>]
-covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep]
+covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep] [--pr]
+                   [--min-savings-ms <n>]
 ```
 
 `run` generates tests for the source files you name.
@@ -128,9 +129,10 @@ print, default 30.
 
 ### audit
 
-`audit` points the same gate at the tests the repo already has. It writes a
-report and changes nothing: no test is edited or deleted, no PR is opened, and no
-model is called.
+`audit` points the same gate at the tests the repo already has. On its own it
+writes a report and changes nothing: no test is edited or deleted, no PR is
+opened, and no model is called. `--pr` is the go-ahead that turns the report into
+a deletion proposal, the same rule `sweep --pr` follows.
 
 | Flag | Meaning |
 |---|---|
@@ -138,6 +140,8 @@ model is called.
 | `--limit <n>` | Audit at most this many spec files, cheapest-value first. `0` (the default) audits every one |
 | `--report <path>` | Write the JSON report to this path. The markdown always goes to `<repo>/.covergen/audit.md` |
 | `--deep` | Plant bugs against every case, not only the ones the static pass flagged |
+| `--pr` | Cut the cases that catch nothing and cover nothing unique, and open a draft PR proposing it |
+| `--min-savings-ms <n>` | Leave a case alone unless cutting it gives back at least this many ms per run |
 
 The unit of judgment is the test case (an `it`/`test` block, a Go `TestXxx`, a
 pytest function), not the file; file totals are derived from it. vitest, jest,
@@ -170,6 +174,22 @@ the gate's spot-check has no opinion when no operator applies. Redundancy is
 measured by subtracting the whole spec file from the suite's coverage, which
 under-reports rather than over-reports it: a line two spec files both cover
 counts as this file's own.
+
+`--pr` removes only a case whose verdict is `redundant`, or one that is both
+`weak_static` and `weak_dynamic`. Two rules bound that, and neither has an
+override:
+
+- a case that catches even one planted bug is never proposed, whatever its
+  coverage.
+- a case that is the only coverage of any line is never proposed, whatever it
+  asserts. The PR lists it as a case to repair instead.
+
+The cut is textual, at the block the case opens on, and a file left with no
+cases is deleted whole. The suite then runs in full with coverage, and unless it
+passes with the same lines covered, every file is put back and nothing is
+opened. The draft PR carries the evidence per case: the verdict, the planted
+bugs it did not catch, the lines nothing else covers (always zero), and the
+seconds each full run gets back. A human reviews it like any other code change.
 
 Exit codes: `0` at least one test was accepted, `2` nothing was accepted (a
 normal outcome, not an error), `1` something broke, `130` a signal stopped the run
