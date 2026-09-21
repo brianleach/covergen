@@ -165,7 +165,8 @@ describe("isEntryPoint", () => {
       "\nAborted on SIGTERM. 0 accepted tests are on disk, not rolled back.\n",
     );
     expect(resumeNote(1, "/tmp/j.json", "SIGINT")).toBe(
-      "\nAborted on SIGINT. 1 accepted test is on disk, not rolled back.\nThe run journal lists them:\n  /tmp/j.json\n",
+      "\nAborted on SIGINT. 1 accepted test is on disk, not rolled back.\n" +
+        "Open the draft PR for them without regenerating:\n  covergen pr --from /tmp/j.json\n",
     );
   });
 
@@ -202,7 +203,7 @@ describe("isEntryPoint", () => {
       const written = out.mock.calls.map((c) => String(c[0])).join("");
       expect(written).toContain("PR BODY");
       expect(written).toContain("1 accepted test is on disk, not rolled back.");
-      expect(written).toContain("The run journal lists them:\n  /tmp/j.json");
+      expect(written).toContain("covergen pr --from /tmp/j.json");
       expect(runPipeline).toHaveBeenCalledWith(
         expect.objectContaining({ repo, targets: ["src/a.ts"], dryRun: true, fast: false, refreshBaseline: false }),
       );

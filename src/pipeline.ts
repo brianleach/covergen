@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { watchForAbort, type AbortWatch } from "./abort.js";
 import type { Config } from "./config.js";
 import { generatorBackend, priceTable, stateDirFor } from "./config.js";
-import { journalId, journalPath, newJournal, writeJournal, type JournalStatus } from "./journal.js";
+import { journalId, journalPath, newJournal, specFileHash, writeJournal, type JournalStatus } from "./journal.js";
 import { countLines, specFileFull } from "./chunk.js";
 import { claudeExec, createClaudeCodeGenerator, preflightClaudeCode } from "./claude-code.js";
 import { runCost } from "./cost.js";
@@ -575,9 +575,12 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   const journal = newJournal(repo.name, journalId());
   journal.baseSha = args.baseSha;
   const journalFile = dryRun ? undefined : journalPath(stateDir, journal.id);
+  /** True once the journal has been given an outcome, so a crash cannot overwrite one. */
+  let journalClosed = false;
   const noteJournal = async (status: JournalStatus = "running", reason?: string): Promise<void> => {
     if (!journalFile) return;
     journal.status = status;
+    if (status !== "running") journalClosed = true;
     journal.tokens = spentHere();
     if (reason) journal.reason = reason;
     // A journal that cannot be written must not fail a run that is otherwise fine.
@@ -834,6 +837,9 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
           journal.accepted.push({
             spec,
             hash: finalCandidate.hash,
+            // The file as this test left it, so a later `pr --from` can tell the
+            // run's own output from something edited after it.
+            specHash: journalFile ? await specFileHash(repo.cwd, spec) : undefined,
             source: target,
             symbol: finalCandidate.segment.symbol,
             newlyCovered: result.delta?.newlyCovered.length ?? 0,
@@ -931,6 +937,14 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
     await noteJournal(aborted ? "aborted" : "finished");
 
     return summary;
+  } catch (err) {
+    // A crash leaves the accepted specs on disk exactly as a signal does, and a
+    // journal still reading `running` describes a run that is still going. Say
+    // aborted with the reason, so the morning report is honest and `pr --from`
+    // has something it is allowed to finish. A journal that already has an
+    // outcome keeps it: a reverted run threw on purpose and kept nothing.
+    if (!journalClosed) await noteJournal("aborted", err instanceof Error ? err.message : String(err));
+    throw err;
   } finally {
     watch.release();
     // Only what never became an accepted test is rolled back. A dry run persists

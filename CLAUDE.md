@@ -58,7 +58,7 @@ cli: covergen run --repo X --file path   |   covergen sweep --repo X --changed-s
 
 - Lean. No abstractions for hypothetical futures. Tests are `*.test.ts` beside source.
 - Never run a model in CI. Generated tests are committed and reviewed like any code.
-- Never open a PR without an explicit go-ahead. `sweep --pr` is that go-ahead and the only path that pushes or opens one; every other run leaves the work in the checkout.
+- Never open a PR without an explicit go-ahead. `sweep --pr` and `pr --from` are the only two, and the only paths that push or open one; every other run leaves the work in the checkout. `pr --from` regenerates nothing: it opens the PR for the specs a journal already names.
 - The Anthropic key never enters process.env. It goes from .env to the client via PipelineArgs.apiKey.
 - Acceptance is per test case: passes k times AND newlyCovered.length > 0 AND lost.length === 0 AND every repo.validate command exits 0 AND, when the mutation spot-check is enabled and produced mutants, at least min_killed of them made the test fail.
 - Repaired candidates pass the same rules registry as initial candidates. Final combined spec files pass k times and validate before the run succeeds.

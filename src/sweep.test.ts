@@ -5,9 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig, type Config } from "./config.js";
 import { ceilingHit, createLimits, parseCeiling, type RunLimits } from "./limits.js";
 import { createLogger } from "./logger.js";
-import type { openDraftPrs } from "./pr.js";
-import { reportLines, sweepAll, writeReport, type SweepAllArgs } from "./sweep.js";
-import type { Candidate, RunSummary } from "./types.js";
+import { newJournal, specFileHash, type RunJournal } from "./journal.js";
+import { openDraftPrs, type CmdExec } from "./pr.js";
+import { openPrFromJournal, reportLines, sweepAll, writeReport, type SweepAllArgs } from "./sweep.js";
+import type { Candidate, RepoConfig, RunSummary } from "./types.js";
 
 const log = createLogger({ level: "silent" });
 
@@ -324,5 +325,72 @@ describe("open covergen PRs", () => {
     });
     expect(a.runOne).not.toHaveBeenCalled();
     expect(reportLines(report)).toContain("r1: 1 target left to an open covergen PR");
+  });
+});
+
+describe("openPrFromJournal", () => {
+  const SPECS = ["src/a.test.ts", "src/b.test.ts"];
+
+  /** A checkout holding the two specs a killed run left, and the journal naming them. */
+  async function killedRun(): Promise<{ config: Config; repo: RepoConfig; journal: RunJournal; calls: string[][] }> {
+    const config = await workspace();
+    const repo = config.repos[0] as RepoConfig;
+    for (const spec of SPECS) await writeFile(join(repo.cwd, spec), `it("${spec}", () => {});\n`, "utf8");
+    const journal: RunJournal = {
+      ...newJournal(repo.name, "20260921T000000Z-abcdef"),
+      status: "aborted",
+      reason: "SIGINT",
+      baseSha: "0".repeat(40),
+      tokens: 4200,
+      accepted: await Promise.all(
+        SPECS.map(async (spec) => ({
+          spec,
+          hash: `hash-of-${spec}`,
+          specHash: (await specFileHash(repo.cwd, spec)) as string,
+          source: "src/a.ts",
+          newlyCovered: 3,
+        })),
+      ),
+    };
+    return { config, repo, journal, calls: [] };
+  }
+
+  /** Stands in for git and for `gh`, which would otherwise need a remote and a login. */
+  function fakeExec(calls: string[][]): CmdExec {
+    return async (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "gh") return { stdout: "https://github.com/example/repo/pull/7\n", stderr: "", exitCode: 0 };
+      if (args[0] === "symbolic-ref") return { stdout: "refs/remotes/origin/main\n", stderr: "", exitCode: 0 };
+      if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return { stdout: "main\n", stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+  }
+
+  it("opens one draft PR committing exactly the specs the journal named", async () => {
+    const { config, repo, journal, calls } = await killedRun();
+    const urls = await openPrFromJournal({
+      config,
+      repo,
+      journal,
+      log,
+      openPr: (a) => openDraftPrs({ ...a, exec: fakeExec(calls) }),
+    });
+
+    expect(urls).toEqual(["https://github.com/example/repo/pull/7"]);
+    const added = calls.find((c) => c[0] === "git" && c[1] === "add");
+    expect(added?.slice(3)).toEqual(SPECS);
+    const created = calls.find((c) => c[0] === "gh") ?? [];
+    expect(created).toContain("--draft");
+    expect(created[created.indexOf("--title") + 1]).toBe("covergen: 2 tests accepted in r1");
+  });
+
+  it("refuses a journal whose spec changed since the run wrote it", async () => {
+    const { config, repo, journal, calls } = await killedRun();
+    await writeFile(join(repo.cwd, "src", "b.test.ts"), 'it("edited by hand", () => {});\n', "utf8");
+
+    await expect(
+      openPrFromJournal({ config, repo, journal, log, openPr: (a) => openDraftPrs({ ...a, exec: fakeExec(calls) }) }),
+    ).rejects.toThrow(/src\/b\.test\.ts has changed since the run wrote it/);
+    expect(calls).toEqual([]);
   });
 });
