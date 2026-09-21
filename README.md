@@ -872,6 +872,10 @@ contents no longer hash to what the run recorded, stops the command with that
 file named, because a PR built on an edited spec would claim a gate result the
 code in it never earned. Put the file back, or run covergen again.
 
+A journal that was never closed, which is what a run killed before crashes were
+journalled leaves, is warned about rather than refused: the other thing it can
+mean is a covergen run still using that checkout.
+
 The branch is cut from the journal's `baseSha`, the commit those tests were
 proven on, and the PR splits into parts under `sweep.pr_max_lines` the way a
 sweep's does. The run never reached the step that proves the accepted specs pass

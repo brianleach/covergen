@@ -386,6 +386,12 @@ export async function openPrFromJournal(args: PrFromJournalArgs): Promise<string
   if (journal.accepted.length === 0) {
     throw new Error(`journal ${journal.id} accepted no test, so there is nothing to open a PR with.`);
   }
+  // Not fatal: a journal written before crashes were journalled still reads
+  // `running`, and refusing it would strand the runs this command exists for.
+  // Said out loud, because the other thing it can mean is a run still going.
+  if (journal.status === "running") {
+    log.warn({ journal: journal.id }, "this journal was never closed, so check that no covergen run is still using this checkout");
+  }
   const drift = await driftedSpecs(repo.cwd, journal);
   if (drift.length > 0) {
     throw new Error(
