@@ -83,6 +83,7 @@ covergen preflight --repo <name> [--deep]
 covergen baseline  --repo <name> [--top <n>]
 covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep] [--pr]
                    [--min-savings-ms <n>]
+covergen pr        --from <journal> [--pr-max-lines <n>]
 ```
 
 `run` generates tests for the source files you name.
@@ -844,11 +845,37 @@ That leaves a dirty checkout of tests that each passed the gate, and
 one at a time but never together, so review them before committing. A second
 signal is taken literally and kills the process at once.
 
-A signal is the only thing that leaves written tests behind. A run that reaches
-the end and finds that its accepted specs pass alone but fail together rolls back
-every spec it wrote, leaving the checkout as it found it. It exits non-zero,
-records nothing as accepted, and writes the reason into `last-run.md` under
-"Reverted" and into the journal as `status: reverted`.
+A crash leaves the same thing behind, for the same reason: an unexpected error
+mid-run does not un-accept the tests already written, so the journal is closed
+as `status: aborted` with the error as its reason rather than left reading
+`running`.
+
+A signal or a crash is the only thing that leaves written tests behind. A run
+that reaches the end and finds that its accepted specs pass alone but fail
+together rolls back every spec it wrote, leaving the checkout as it found it. It
+exits non-zero, records nothing as accepted, and writes the reason into
+`last-run.md` under "Reverted" and into the journal as `status: reverted`.
+
+### Opening the PR a killed run never opened
+
+```
+covergen pr --from .covergen/runs/<id>.json
+```
+
+Reads the journal, looks its repo up in covergen.yaml, and opens the draft PR
+for exactly the specs it names. Nothing is regenerated and no gate is re-run:
+those tests already passed one, and the point of this command is not paying for
+them twice.
+
+It refuses rather than guesses. A spec the journal names that is gone, or whose
+contents no longer hash to what the run recorded, stops the command with that
+file named, because a PR built on an edited spec would claim a gate result the
+code in it never earned. Put the file back, or run covergen again.
+
+The branch is cut from the journal's `baseSha`, the commit those tests were
+proven on, and the PR splits into parts under `sweep.pr_max_lines` the way a
+sweep's does. The run never reached the step that proves the accepted specs pass
+together, so the body says so and asks for one suite run before merging.
 
 ### A cron line
 
@@ -1036,8 +1063,9 @@ and update every consumer. Other conventions from `CLAUDE.md`:
 
 - Lean. No abstractions for hypothetical futures.
 - Never run a model in CI.
-- Never open a PR without an explicit go-ahead. `sweep --pr` is that go-ahead and
-  the only path that pushes; every other run leaves the work in the checkout.
+- Never open a PR without an explicit go-ahead. `sweep --pr` and `pr --from` are
+  the only two, and the only paths that push; every other run leaves the work in
+  the checkout.
 - The Anthropic key never enters `process.env`.
 - Runners shell out with `execFile`, honor `commandPrefix`, and always write lcov
   to a path they return.

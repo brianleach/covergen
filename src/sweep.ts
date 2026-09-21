@@ -15,6 +15,7 @@ import { refreshBase } from "./base.js";
 import type { Config } from "./config.js";
 import { mutationScore, prBody, prTitle, specQuality, type MutationScore, type SpecQuality } from "./emit.js";
 import { changedFiles, listSources, matchesSources, toCwdRelative } from "./git.js";
+import { driftedSpecs, journalBody, journalTitle, type RunJournal } from "./journal.js";
 import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js";
 import type { Logger } from "./logger.js";
 import { orderTargetsByGap, orderTargetsByValue, runPipeline } from "./pipeline.js";
@@ -352,4 +353,56 @@ export async function writeReport(path: string, report: SweepReport): Promise<vo
   const abs = resolve(path);
   await mkdir(dirname(abs), { recursive: true });
   await writeFile(abs, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+}
+
+export interface PrFromJournalArgs {
+  config: Config;
+  repo: RepoConfig;
+  journal: RunJournal;
+  log: Logger;
+  /** Lines of accepted spec one PR may hold. Defaults to sweep.pr_max_lines. */
+  prMaxLines?: number;
+  /** Injected in tests so the path runs against a fixture checkout. */
+  openPr?: typeof openDraftPrs;
+  now?: Date;
+}
+
+/**
+ * Open the draft PR a run never got to, from the journal it left behind.
+ *
+ * Nothing is regenerated and no gate is re-run: the accepted specs are already
+ * in the checkout and the journal says which ones and what they cost. The one
+ * thing this has to establish is that the checkout still holds what the run put
+ * there, because a PR built on an edited spec would claim a gate result for
+ * code that never passed it. A drifted or missing spec is refused outright
+ * rather than quietly dropped from the file list.
+ */
+export async function openPrFromJournal(args: PrFromJournalArgs): Promise<string[]> {
+  const { config, repo, journal, log } = args;
+  const openPr = args.openPr ?? openDraftPrs;
+  if (journal.repo !== repo.name) {
+    throw new Error(`journal ${journal.id} belongs to repo "${journal.repo}", not "${repo.name}".`);
+  }
+  if (journal.accepted.length === 0) {
+    throw new Error(`journal ${journal.id} accepted no test, so there is nothing to open a PR with.`);
+  }
+  const drift = await driftedSpecs(repo.cwd, journal);
+  if (drift.length > 0) {
+    throw new Error(
+      `refusing to open a PR from journal ${journal.id}: ${drift.join(", ")}. ` +
+        "These tests were proven as the run left them, so put the files back or run covergen again.",
+    );
+  }
+  const files = [...new Set(journal.accepted.map((entry) => entry.spec))];
+  const urls = await openPr({
+    repo,
+    files,
+    title: journalTitle(journal),
+    body: journalBody(journal),
+    maxLines: args.prMaxLines ?? config.sweep.pr_max_lines,
+    baseSha: journal.baseSha,
+    now: args.now,
+  });
+  log.info({ repo: repo.name, journal: journal.id, urls, files: files.length }, "draft PR opened from a run journal");
+  return urls;
 }

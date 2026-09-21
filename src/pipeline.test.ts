@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rollback, type AbortWatch, type Guarded } from "./abort.js";
+import { specFileHash } from "./journal.js";
 import type { RuleViolation } from "./rules.js";
 import type { Candidate, CoverageDelta, GateResult, RepoConfig, RunResult, Segment } from "./types.js";
 import type { Config } from "./config.js";
@@ -777,6 +778,38 @@ describe("runPipeline", () => {
     // into and the source the mutation spot-check rewrites.
     expect(watch.guards[0]?.map((g) => g.path)).toEqual([join(repo.cwd, SPEC), join(repo.cwd, TARGET)]);
     expect(watch.guards[0]?.[1]?.original).toBe(SOURCE_TEXT);
+  });
+
+  it("journals an unexpected crash as aborted, with the error as the reason", async () => {
+    const repo = await fixtureRepo();
+    let n = 0;
+    h.generate.mockImplementation(async (...args: unknown[]) => {
+      n += 1;
+      return candidate({ id: `c${n}`, hash: `h${n}`, specPath: String(args[2]), code: `${WHOLE_FILE_CODE} # ${n}` });
+    });
+    let gated = 0;
+    h.evaluate.mockImplementation(async () => {
+      gated += 1;
+      // Not a signal and not a verdict: the kind of failure that used to leave
+      // the journal reading `running` forever.
+      if (gated === 2) throw new Error("runner vanished mid-gate");
+      return accepted;
+    });
+
+    await expect(run(repo, { targets: [TARGET, TARGET2] })).rejects.toThrow("runner vanished mid-gate");
+
+    const runs = join(repo.root, ".covergen", "runs");
+    const journal = JSON.parse(await readFile(join(runs, String((await readdir(runs))[0])), "utf8")) as {
+      status: string;
+      reason: string;
+      accepted: { spec: string; specHash: string }[];
+    };
+    expect(journal.status).toBe("aborted");
+    expect(journal.reason).toBe("runner vanished mid-gate");
+    // The one accepted spec is still on disk, and the hash the journal recorded
+    // is the file sitting there, which is what `pr --from` checks before it opens.
+    expect(journal.accepted.map((e) => e.spec)).toEqual([SPEC]);
+    expect(journal.accepted[0]?.specHash).toBe(await specFileHash(repo.cwd, SPEC));
   });
 
   it("rolls back only the candidate in flight, mutant included, and keeps the accepted one", async () => {
