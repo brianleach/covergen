@@ -49,6 +49,24 @@ import type {
   Segment,
 } from "./types.js";
 
+/**
+ * A run that gated every candidate and then failed anyway, which today means the
+ * accepted specs passed alone and not together, so all of them were rolled back.
+ *
+ * The summary rides along with the error because the gate had already decided
+ * every candidate: last-run.md names each rejection and its reason, and a report
+ * built from the error alone would say the repo did nothing at all.
+ */
+export class RunFailed extends Error {
+  readonly summary: RunSummary;
+
+  constructor(message: string, summary: RunSummary) {
+    super(message);
+    this.name = "RunFailed";
+    this.summary = summary;
+  }
+}
+
 export interface PipelineArgs {
   config: Config;
   repo: RepoConfig;
@@ -921,7 +939,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
         { repo: repo.name, specs: touchedSpecs.size, err: verifyFailure.message },
         "combined verification failed, rolling back every spec this run wrote",
       );
-      throw verifyFailure;
+      throw new RunFailed(verifyFailure.message, summary);
     }
 
     const nextState = recordRun(state, summary, {
