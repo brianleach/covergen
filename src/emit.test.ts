@@ -253,6 +253,22 @@ describe("prBody", () => {
     expect(prBody(summary())).toContain("no bug could be planted on the covered lines");
   });
 
+  it("moves the coverage line over the repo's sources, with the whole package beside it", () => {
+    const coverage = {
+      before: { sources: { covered: 3, total: 5, pct: 60, files: 2 }, all: { covered: 5, total: 17, pct: 29.41, files: 6 } },
+      after: { sources: { covered: 4, total: 5, pct: 80, files: 2 }, all: { covered: 6, total: 17, pct: 35.29, files: 6 } },
+    };
+    const body = prBody(summary({ coverage }));
+    expect(body).toContain(
+      "Line coverage over the repo's sources: 60.0% before, 80.0% after (whole package 29.4% before, 35.3% after).",
+    );
+    expect(body.indexOf("Line coverage over the repo's sources")).toBeLessThan(body.indexOf("## Accepted tests"));
+  });
+
+  it("leaves the coverage line out when the run measured no repo figure", () => {
+    expect(prBody(summary())).not.toContain("Line coverage over the repo's sources");
+  });
+
   it("names the assertions each accepted test uses", () => {
     const body = prBody(summary());
     expect(body).toContain("| Planted bugs caught | Assertions |");

@@ -120,6 +120,22 @@ describe("sweepAll", () => {
     expect(report.repos[0]?.rejected).toEqual({ test_failed: 1 });
   });
 
+  it("carries each repo's scoped coverage into the report and the printed lines", async () => {
+    const config = await workspace();
+    const coverage = {
+      before: { sources: { covered: 3, total: 5, pct: 60, files: 2 }, all: { covered: 5, total: 17, pct: 29.41, files: 6 } },
+      after: { sources: { covered: 4, total: 5, pct: 80, files: 2 }, all: { covered: 6, total: 17, pct: 35.29, files: 6 } },
+    };
+    const runOne = vi.fn(async (a: { repo: { name: string } }) => ({ ...summaryFor(a.repo.name, 1), coverage }));
+    const report = await sweepAll(args(config, { runOne: runOne as unknown as SweepAllArgs["runOne"] }));
+    expect(report.repos[0]?.coverage).toEqual(coverage);
+    // A repo that never ran has no figure to report rather than a zero.
+    expect(report.repos[2]?.coverage).toBeUndefined();
+    expect(reportLines(report)).toContain(
+      "Line coverage over the repo's sources: 60.0% before, 80.0% after (whole package 29.4% before, 35.3% after).",
+    );
+  });
+
   it("keeps going when one repo throws", async () => {
     const config = await workspace();
     const runOne = vi.fn(async (a: { repo: { name: string } }) => {

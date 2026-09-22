@@ -70,12 +70,19 @@ vi.mock("./runners/index.js", () => ({
   },
 }));
 
-vi.mock("./git.js", () => ({
+// Partial, like the lcov mock below: the run scopes its own coverage figure to
+// the repo's sources, so the real glob matching has to stay in place while the
+// fingerprint and the source listing are faked.
+vi.mock("./git.js", async (orig) => ({
+  ...(await orig<typeof import("./git.js")>()),
   treeFingerprint: async () => "fp1234567890abcd",
   listSources: async () => h.listSources(),
 }));
 
-vi.mock("./lcov.js", () => ({
+// Partial: the run now summarizes its own baseline map, so the real counting
+// has to stay in place while the reads are faked.
+vi.mock("./lcov.js", async (orig) => ({
+  ...(await orig<typeof import("./lcov.js")>()),
   readLcov: (...a: unknown[]) => h.readLcov(...(a as [])),
   discardCoverageDir: async () => undefined,
   mergeCoverage: (m: Map<string, unknown>) => new Map(m),

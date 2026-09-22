@@ -130,6 +130,36 @@ export interface FileCoverage {
 
 export type CoverageMap = Map<string, FileCoverage>;
 
+/** Line totals over some set of files, with `pct` 0 when nothing is instrumented. */
+export interface CoverageSummary {
+  covered: number;
+  total: number;
+  pct: number;
+  /** How many files contributed instrumented lines. */
+  files: number;
+}
+
+/** Which files a reported percentage was measured over. */
+export type CoverageScope = "sources" | "all";
+
+/**
+ * The same coverage run read two ways: over the files the repo declares as
+ * sources, and over every file the report instrumented. They differ whenever
+ * the runner measures more than covergen targets, which is the usual case, and
+ * a single number that does not say which one it is has been read as the other
+ * one often enough to be worth reporting both.
+ */
+export interface ScopedCoverage {
+  sources: CoverageSummary;
+  all: CoverageSummary;
+}
+
+/** A run's coverage before and after the tests it accepted. */
+export interface RunCoverage {
+  before: ScopedCoverage;
+  after: ScopedCoverage;
+}
+
 export interface CoverageDelta {
   path: string;
   /** Lines that were 0 hits before and >0 after. */
@@ -349,6 +379,12 @@ export interface RunSummary {
   journal?: string;
   /** What those tokens cost, per model, when a price is known for the model. Never set on a subscription run. */
   cost?: RunCost;
+  /**
+   * Repo coverage before and after this run, scoped and whole. Absent on a fast
+   * run, whose baseline measures one spec rather than the repo, and on summaries
+   * written before the figure existed.
+   */
+  coverage?: RunCoverage;
   durationMs: number;
 }
 
