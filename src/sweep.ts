@@ -20,7 +20,8 @@ import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js"
 import type { Logger } from "./logger.js";
 import { orderTargetsByGap, orderTargetsByValue, RunFailed, runPipeline } from "./pipeline.js";
 import { dirtyPaths, openDraftPrs } from "./pr.js";
-import type { RepoConfig, RunSummary } from "./types.js";
+import { movementLine } from "./scope.js";
+import type { RepoConfig, RunCoverage, RunSummary } from "./types.js";
 
 export interface TargetArgs {
   config: Config;
@@ -109,6 +110,12 @@ export interface RepoReport {
   baseRefresh?: string;
   /** Targets skipped because an open covergen PR already writes their files. */
   openPrBacklog?: number;
+  /**
+   * Line coverage before and after this repo's run, measured both over the
+   * repo's `sources` minus `exclude` and over the whole report. Absent when the
+   * repo never ran, and on a fast run, which has no repo-wide baseline.
+   */
+  coverage?: RunCoverage;
 }
 
 export interface SweepReport {
@@ -283,6 +290,7 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         baseSha,
         baseRefresh,
         openPrBacklog: excluded.length,
+        coverage: summary.coverage,
         ...runFields(summary),
       };
 
@@ -346,6 +354,9 @@ export function reportLines(report: SweepReport): string {
       `  ${r.status.padEnd(7)} ${r.repo}: ${r.accepted}/${r.targetsAttempted} accepted, ` +
         `${r.tokens.toLocaleString("en-US")} tokens${detail ? `, ${detail}` : ""}`,
     );
+    // Scoped, and said so, for the same reason the PR body scopes it: the
+    // whole-report percentage is a different denominator, not a correction.
+    if (r.coverage) out.push(`          ${movementLine(r.coverage.before, r.coverage.after)}`);
   }
   // Spent tokens are visible on every line above; unspent ones are not, so the
   // reason a repo was quiet has to be said out loud.

@@ -80,7 +80,7 @@ covergen run       --repo <name> --file <rel...> [--dry-run] [--fast] [--refresh
 covergen sweep     (--repo <name> | --all) [--pr] [--changed-since <ref>] [--limit <n>] [--dry-run]
                    [--max-tokens <n>] [--max-minutes <n>] [--report <path>] [--refresh-baseline]
 covergen preflight --repo <name> [--deep]
-covergen baseline  --repo <name> [--top <n>]
+covergen baseline  --repo <name> [--top <n>] [--scope <sources|all>]
 covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep] [--pr]
                    [--min-savings-ms <n>]
 covergen pr        --from <journal> [--pr-max-lines <n>]
@@ -127,6 +127,33 @@ cached baseline, because a baseline on disk is that same proof and more of it.
 prints the highest-value targets with the components of each score (uncovered
 lines, branch density, churn, importers); `--top <n>` sets how many rows to
 print, default 30.
+
+| Flag | Meaning |
+|---|---|
+| `--repo <name>` | Required. A repo name from covergen.yaml |
+| `--top <n>` | How many files to print. Default 30 |
+| `--scope <which>` | Which files the percentage is measured over: `sources` (default) or `all` |
+
+### Which files a percentage is measured over
+
+A coverage report instruments whatever the runner was told to instrument, which
+is rarely the set of files a repo lists in `sources`. Narrowing `sources` to the
+logic worth testing changes what covergen targets, and a percentage taken over
+the whole report does not move with it, so the two numbers can be far apart and
+both correct:
+
+```
+myrepo sources: 240/1500 lines covered (16.0%) across 40 files
+myrepo whole report: 240/13000 lines covered (1.8%) across 260 files
+```
+
+Every percentage covergen prints says which set it counted. The default
+everywhere is `sources` minus `exclude`, because that is the set a sweep can
+move; the whole-report figure follows it whenever the two differ, so neither can
+be read as a correction of the other. `baseline --scope all` reports the whole
+report on its own, and ranks every instrumented file rather than only the
+sources. The same pair of figures is what the draft PR body's before/after line,
+the `sweep` stdout summary and the JSON report's `repos[].coverage` all carry.
 
 ### audit
 
@@ -781,6 +808,7 @@ read by whatever keeps the coverage ledger:
 | `mutation` | Run-wide `{ killed, tried, score }`. `score` is killed over tried, rounded to three decimals, or `null` when nothing was mutated |
 | `repos[].mutation` | The same three fields for one repo |
 | `repos[].acceptedSpecs[]` | One entry per accepted test: `spec`, `symbol`, `newlyCovered`, `mutantsKilled`, `mutantsTried`, and `assertions`, the matcher names the test uses |
+| `repos[].coverage` | `{ before, after }`, each `{ sources, all }` and each of those `{ covered, total, pct, files }`. `sources` counts the repo's `sources` minus `exclude`, `all` counts everything the report instrumented. Absent when the repo never ran |
 
 `mutation.score` is the number to track over time. Coverage says how much of the
 code the suite runs; the mutation score says how much of it the suite actually

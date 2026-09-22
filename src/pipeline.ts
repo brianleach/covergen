@@ -35,6 +35,7 @@ import { ruleViolations, rulesText, verdictFor } from "./rules.js";
 import { getRunner } from "./runners/index.js";
 import { failingCrates } from "./runners/cargo.js";
 import { runCommand } from "./runners/exec.js";
+import { scopeCoverage } from "./scope.js";
 import { buildSegments } from "./segments.js";
 import { rankByValue } from "./value.js";
 import { freezableHashes, loadState, recordRun, saveState, skipSet } from "./state.js";
@@ -531,6 +532,11 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   }
 
   const baseline = await loadBaseline({ config, repo, runner, log, fast, baselineFiles, refresh: args.refreshBaseline });
+  // Read now, because markCovered writes every accepted candidate's lines back
+  // into this same map: by the end of the run it is the "after" picture. A fast
+  // run measured one spec rather than the repo, so it has no repo figure to
+  // report and says nothing rather than something wrong by two orders.
+  const coverageBefore = fast ? undefined : scopeCoverage(repo, baseline);
 
   const state = await loadState(repo, config.state_dir);
   const skip = skipSet(state);
@@ -902,6 +908,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
       journal: journalFile,
       // A subscription run has no dollar meter, so it reports tokens and nothing else.
       cost: subscription ? undefined : runCost(perModel, priceTable(config)),
+      coverage: coverageBefore ? { before: coverageBefore, after: scopeCoverage(repo, baseline) } : undefined,
       durationMs: 0,
     };
     if (args.limits) args.limits.spent += totalTokens(summary.tokens);

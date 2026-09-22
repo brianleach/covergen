@@ -222,7 +222,7 @@ describe("isEntryPoint", () => {
 
   test("baseline surfaces the runner output without lcov, and ranks files with it", async () => {
     const { vi } = await import("vitest");
-    const repo = { name: "web", runner: "vitest", cwd: "/repo" };
+    const repo = { name: "web", runner: "vitest", cwd: "/repo", sources: ["src/**/*.ts"] };
     const config = { repos: [repo], anthropic: { api_key_env: "COVERGEN_TEST_KEY" }, gate: { timeout_ms: 1000 }, warnings: [] };
     const run = vi
       .fn()
@@ -241,8 +241,7 @@ describe("isEntryPoint", () => {
     }));
     vi.doMock("./lcov.js", async (orig) => ({
       ...(await orig<typeof import("./lcov.js")>()),
-      readLcov: () => new Map([["src/a.ts", {}]]),
-      summarize: () => ({ covered: 3, total: 4, pct: 75 }),
+      readLcov: () => new Map([["src/a.ts", { path: "src/a.ts", lines: new Map([[1, 1], [2, 0]]) }], ["vite.config.ts", { path: "vite.config.ts", lines: new Map([[1, 0], [2, 0]]) }]]),
     }));
     vi.doMock("./value.js", async (orig) => ({
       ...(await orig<typeof import("./value.js")>()),
@@ -261,8 +260,12 @@ describe("isEntryPoint", () => {
 
       await buildProgram().parseAsync(argv);
       const written = out.mock.calls.map((c) => String(c[0])).join("");
-      expect(written).toContain("web: 3/4 lines covered (75.0%) across 1 files");
+      // The scoped figure is the repo's sources only; the whole report, which
+      // also instrumented a config file the sweep would never target, follows it.
+      expect(written).toContain("web sources: 1/2 lines covered (50.0%) across 1 file");
+      expect(written).toContain("web whole report: 1/4 lines covered (25.0%) across 2 files");
       expect(written).toContain("src/a.ts");
+      expect(written).not.toContain("vite.config.ts");
     } finally {
       out.mockRestore();
       process.exitCode = undefined;

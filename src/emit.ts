@@ -16,6 +16,7 @@ import { dirname, resolve } from "node:path";
 import { formatUsd } from "./cost.js";
 import { limitNote } from "./limits.js";
 import { assertionKinds } from "./rules.js";
+import { movementLine } from "./scope.js";
 import type { Candidate, RepoConfig, RunSummary, RunnerName } from "./types.js";
 
 export interface EmitSkip {
@@ -261,6 +262,10 @@ export function prBody(summary: RunSummary): string {
       `${summary.candidates.length} candidates generated, ${accepted.length} accepted in ` +
       `${(summary.durationMs / 1000).toFixed(1)}s.`,
   );
+  // Scoped, and labelled as scoped. The repo-wide figure a reviewer already has
+  // in a badge is measured over everything the runner instruments, so a bare
+  // percentage here reads as a contradiction rather than as a different set.
+  if (summary.coverage) out.push(movementLine(summary.coverage.before, summary.coverage.after));
   out.push("");
 
   out.push("## Accepted tests");

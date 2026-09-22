@@ -8,7 +8,7 @@
 
 import { readFile, rm } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { CoverageDelta, CoverageMap, FileCoverage } from "./types.js";
+import type { CoverageDelta, CoverageMap, CoverageSummary, FileCoverage } from "./types.js";
 
 export interface ParseLcovOptions {
   /** Absolute paths are made relative to this directory. Defaults to process.cwd(). */
@@ -175,15 +175,28 @@ export function diffCoverage(before: CoverageMap, after: CoverageMap, path: stri
   };
 }
 
-/** Whole-map line coverage totals. `pct` is 0 when nothing is instrumented. */
-export function summarize(map: CoverageMap): { covered: number; total: number; pct: number } {
+/**
+ * Line coverage totals over the map, or over the files `include` accepts.
+ * `pct` is 0 when nothing is instrumented.
+ *
+ * The predicate is what lets a caller report the percentage for the files a
+ * repo actually declares as sources instead of everything the runner happened
+ * to instrument. A file the predicate rejects contributes to neither side of
+ * the ratio, so it cannot dilute the figure.
+ */
+export function summarize(map: CoverageMap, include?: (path: string) => boolean): CoverageSummary {
   let covered = 0;
   let total = 0;
+  let files = 0;
   for (const file of map.values()) {
+    if (include && !include(file.path)) continue;
+    let instrumented = false;
     for (const hits of file.lines.values()) {
       total += 1;
+      instrumented = true;
       if (hits > 0) covered += 1;
     }
+    if (instrumented) files += 1;
   }
-  return { covered, total, pct: total === 0 ? 0 : (covered / total) * 100 };
+  return { covered, total, pct: total === 0 ? 0 : (covered / total) * 100, files };
 }

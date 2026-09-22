@@ -243,11 +243,21 @@ describe("diffCoverage", () => {
 describe("summarize", () => {
   it("counts covered and instrumented lines across every file", () => {
     const cov = parseLcov(simplecovLcov);
-    expect(summarize(cov)).toEqual({ covered: 3, total: 6, pct: 50 });
+    expect(summarize(cov)).toEqual({ covered: 3, total: 6, pct: 50, files: 2 });
+  });
+
+  it("counts only the files the include predicate accepts", () => {
+    const cov = parseLcov(simplecovLcov);
+    const first = [...cov.keys()][0] as string;
+    expect(summarize(cov, (path) => path === first)).toEqual({ covered: 2, total: 4, pct: 50, files: 1 });
   });
 
   it("returns zero percent for an empty map", () => {
-    expect(summarize(new Map())).toEqual({ covered: 0, total: 0, pct: 0 });
+    expect(summarize(new Map())).toEqual({ covered: 0, total: 0, pct: 0, files: 0 });
+  });
+
+  it("returns zero percent when the predicate accepts nothing", () => {
+    expect(summarize(parseLcov(simplecovLcov), () => false)).toEqual({ covered: 0, total: 0, pct: 0, files: 0 });
   });
 });
 

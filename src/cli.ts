@@ -19,17 +19,19 @@ import { findRepo, generatorBackend, loadConfig, type Config } from "./config.js
 import { buildFlows, crawl, exploreEnv, renderReport } from "./explore.js";
 import { openBrowserReader } from "./explore-browser.js";
 import { indexSpecs, loadSpecs } from "./explore-specs.js";
+import { matchesSources } from "./git.js";
 import { readJournal } from "./journal.js";
-import { readLcov, summarize } from "./lcov.js";
+import { readLcov } from "./lcov.js";
 import { createLimits, parseCeiling, totalTokens } from "./limits.js";
 import { createLogger, type Logger } from "./logger.js";
 import { mutationScore, prBody } from "./emit.js";
 import { runPipeline } from "./pipeline.js";
 import { runRemoval } from "./removal.js";
+import { parseScope, scopeCoverage, scopesDiffer } from "./scope.js";
 import { openPrFromJournal, reportLines, runFields, sweepAll, sweepTargets, writeReport } from "./sweep.js";
 import { getRunner } from "./runners/index.js";
 import { rankByValue, valueTable } from "./value.js";
-import type { CoverageMap, RepoConfig, RunSummary } from "./types.js";
+import type { CoverageMap, CoverageScope, CoverageSummary, RepoConfig, RunSummary, ScopedCoverage } from "./types.js";
 
 export const EXIT_OK = 0;
 export const EXIT_ERROR = 1;
@@ -116,6 +118,20 @@ async function baselineCoverage(repo: RepoConfig, timeoutMs: number): Promise<Co
     throw new Error(`no lcov produced for ${repo.name} (exit ${result.exitCode}). Runner output:\n${tail}`);
   }
   return readLcov(result.lcovPath, { cwd: repo.cwd });
+}
+
+/**
+ * The headline above the value table. Under the default scope both figures are
+ * printed whenever they disagree, because "the repo is at 1.8 percent" and "the
+ * code covergen targets is at 16.0 percent" are both true and only one of them
+ * is the number a sweep can move.
+ */
+export function baselineSummaryText(name: string, coverage: ScopedCoverage, scope: CoverageScope): string {
+  const row = (label: string, s: CoverageSummary): string =>
+    `${name} ${label}: ${s.covered}/${s.total} lines covered (${s.pct.toFixed(1)}%) across ${s.files} ${s.files === 1 ? "file" : "files"}\n`;
+  if (scope === "all") return `${row("whole report", coverage.all)}\n`;
+  const scoped = row("sources", coverage.sources);
+  return scopesDiffer(coverage) ? `${scoped}${row("whole report", coverage.all)}\n` : `${scoped}\n`;
 }
 
 export function buildProgram(): Command {
@@ -254,6 +270,7 @@ export function buildProgram(): Command {
               targetsAttempted: targets.length,
               tokens: totalTokens(summary.tokens),
               durationMs: summary.durationMs,
+              coverage: summary.coverage,
               ...runFields(summary),
             },
           ],
@@ -382,20 +399,25 @@ export function buildProgram(): Command {
     .description("Run the suite with coverage and print the highest-value targets")
     .requiredOption("--repo <name>", "repo name from covergen.yaml")
     .option("--top <n>", "how many files to print", "30")
-    .action(async (opts: { repo: string; top: string }) => {
+    .option("--scope <which>", "measure over the repo's sources minus exclude, or over the whole report", "sources")
+    .action(async (opts: { repo: string; top: string; scope?: string }) => {
       const { config } = context(program);
+      const scope = parseScope(opts.scope);
       const repo = findRepo(config, opts.repo);
       const map = await baselineCoverage(repo, config.gate.timeout_ms);
+      // Ranking the whole map would offer targets the repo does not claim as
+      // sources, which the sweep would then refuse to touch.
+      const targets = [...map.keys()].filter((path) => scope === "all" || matchesSources(repo, path));
       // The same ranking a sweep uses, with the components printed, so the file
       // at the top can be argued with instead of taken on faith.
-      const rows = await rankByValue({ repo, baseline: map, targets: [...map.keys()] });
+      const rows = await rankByValue({ repo, baseline: map, targets });
 
       const parsedTop = Number.parseInt(opts.top, 10);
       const top = Number.isFinite(parsedTop) && parsedTop > 0 ? parsedTop : 30;
-      const overall = summarize(map);
-      process.stdout.write(
-        `${repo.name}: ${overall.covered}/${overall.total} lines covered (${overall.pct.toFixed(1)}%) across ${rows.length} files\n\n`,
-      );
+      // Both numbers, always, when they differ: the scoped one is what a sweep
+      // of this repo can move, the whole-report one is what a coverage badge
+      // shows, and reading either as the other has cost real debugging time.
+      process.stdout.write(baselineSummaryText(repo.name, scopeCoverage(repo, map), scope));
       process.stdout.write(valueTable(rows.slice(0, top)));
     });
 
