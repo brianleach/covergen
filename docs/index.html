@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>covergen</title>
+<title>Covergen</title>
 <meta name="description" content="Coverage-gated LLM test generation. Generates candidate tests, keeps only the ones that build, pass repeatedly, strictly raise coverage, pass the repo's own checks, and catch a planted bug.">
 <style>
 :root {
@@ -139,7 +139,7 @@ footer {
 <div class="wrap">
 
 <header>
-  <h1>covergen</h1>
+  <h1>Covergen</h1>
   <p class="pitch">Coverage-gated LLM test generation. It points at a repo, finds the uncovered
   lines, asks Claude for candidate tests, and keeps only the candidates that survive a gate.
   Everything else is discarded automatically.</p>
@@ -163,7 +163,7 @@ all five of these before it is written to a spec file:</p>
   <li><b>It passes k times in a row.</b><span>Default <code>gate.k</code> is 3 consecutive runs, so a test that only passes sometimes is rejected as flaky rather than merged.</span></li>
   <li><b>It strictly raises line coverage.</b><span>Measured against a baseline of the repo's own suite. A candidate that covers nothing new is rejected, however good it looks.</span></li>
   <li><b>It passes the repo's own checks.</b><span>Whatever the project already gates on, lint, type checks, or any other validate command, runs against the new test too.</span></li>
-  <li><b>It catches a planted bug.</b><span>covergen breaks the lines the test just covered, one change at a time, and the test has to notice at least one of them. This is the gate that separates a real test from an assertion that passes whatever the code did.</span></li>
+  <li><b>It catches a planted bug.</b><span>Covergen breaks the lines the test just covered, one change at a time, and the test has to notice at least one of them. This is the gate that separates a real test from an assertion that passes whatever the code did.</span></li>
 </ol>
 
 <h2>Install and first run</h2>
@@ -244,7 +244,7 @@ through. Example, file names synthetic:</p>
 </div>
 
 <h2>Runners</h2>
-<p>covergen never instruments anything itself. It runs the repo's own test runner and reads the
+<p>Covergen never instruments anything itself. It runs the repo's own test runner and reads the
 lcov that runner writes. Each row below is backed by a committed fixture the test suite runs, or
 by a read-only dry run against a real repository. The full evidence, including what each repo has
 to install first, is in the <a href="https://github.com/brianleach/covergen/blob/main/docs/SUPPORT.md">support matrix</a>.</p>
@@ -269,7 +269,7 @@ lines plus an idiom pack so generated tests match the ecosystem's conventions.</
 <h2>Read more</h2>
 <ul>
   <li><a href="https://github.com/brianleach/covergen">Source on GitHub</a></li>
-  <li><a href="https://www.npmjs.com/package/covergen">covergen on npm</a></li>
+  <li><a href="https://www.npmjs.com/package/covergen">Covergen on npm</a></li>
   <li><a href="https://github.com/brianleach/covergen/blob/main/docs/DESIGN.md">Design notes</a>, how the pipeline and the gate are put together</li>
   <li><a href="https://github.com/brianleach/covergen/blob/main/docs/SUPPORT.md">Support matrix</a>, what runs where and the evidence behind each claim</li>
   <li><a href="https://github.com/brianleach/covergen/blob/main/LICENSE">LICENSE</a></li>
