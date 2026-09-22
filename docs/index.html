@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>covergen</title>
+<meta name="description" content="Coverage-gated LLM test generation. Generates candidate tests, keeps only the ones that build, pass repeatedly, strictly raise coverage, pass the repo's own checks, and catch a planted bug.">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #d9dde3;
+  --text: #16191d;
+  --muted: #5b6672;
+  --accent: #1a6b3c;
+  --accent-soft: #e8f3ec;
+  --code-bg: #f2f4f7;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101317;
+    --panel: #171b21;
+    --border: #2a3039;
+    --text: #e6e9ed;
+    --muted: #9aa5b1;
+    --accent: #6cd08f;
+    --accent-soft: #14251b;
+    --code-bg: #1b2028;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 72px; }
+header { padding: 56px 0 8px; }
+h1 { font-size: 2.6rem; line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.02em; }
+.pitch { font-size: 1.2rem; color: var(--text); margin: 0 0 20px; max-width: 46em; }
+.sub { color: var(--muted); margin: 0 0 24px; max-width: 46em; }
+.badges a {
+  display: inline-block;
+  margin: 0 8px 8px 0;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+.badges a:hover { border-color: var(--accent); color: var(--accent); }
+.badges a.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+h2 {
+  font-size: 1.35rem;
+  margin: 48px 0 14px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  letter-spacing: -0.01em;
+}
+h3 { font-size: 1rem; margin: 26px 0 8px; }
+p { margin: 0 0 14px; }
+a { color: var(--accent); }
+ol.gates { margin: 0; padding: 0; list-style: none; counter-reset: gate; }
+ol.gates li {
+  counter-increment: gate;
+  position: relative;
+  padding: 12px 0 12px 46px;
+  border-bottom: 1px solid var(--border);
+}
+ol.gates li:last-child { border-bottom: 0; }
+ol.gates li::before {
+  content: counter(gate);
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font: 600 0.85rem/26px var(--mono);
+  text-align: center;
+}
+ol.gates b { display: block; }
+ol.gates span { color: var(--muted); font-size: 0.95rem; }
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font: 0.88rem/1.6 var(--mono);
+  margin: 0 0 14px;
+}
+code { font-family: var(--mono); font-size: 0.9em; }
+p code, li code, td code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; }
+.note { color: var(--muted); font-size: 0.95rem; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; margin-bottom: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+.pr {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 4px 20px 20px;
+  margin-bottom: 14px;
+}
+.pr .prtitle { font-size: 1.05rem; font-weight: 700; margin: 18px 0 12px; }
+.pr .headline { color: var(--accent); font-weight: 600; }
+.pr h4 { font-size: 0.95rem; margin: 22px 0 8px; }
+.pr ul { margin: 0 0 8px; padding-left: 20px; }
+.pr li { margin-bottom: 4px; }
+.pr hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0 14px; }
+.pr table { font-size: 0.85rem; }
+footer {
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+@media (max-width: 560px) {
+  header { padding-top: 36px; }
+  h1 { font-size: 2rem; }
+  .pitch { font-size: 1.08rem; }
+  .pr { padding: 4px 14px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>covergen</h1>
+  <p class="pitch">Coverage-gated LLM test generation. It points at a repo, finds the uncovered
+  lines, asks Claude for candidate tests, and keeps only the candidates that survive a gate.
+  Everything else is discarded automatically.</p>
+  <p class="sub">No model ever runs in CI. Generated tests are committed and reviewed like any
+  other code. The design follows the published work on Uber AutoCover (ICSE-SEIP 2026),
+  Meta TestGen-LLM, and CoverUp.</p>
+  <p class="badges">
+    <a class="primary" href="https://github.com/brianleach/covergen">GitHub</a>
+    <a href="https://www.npmjs.com/package/covergen">npm</a>
+    <a href="https://github.com/brianleach/covergen/blob/main/docs/DESIGN.md">Design notes</a>
+    <a href="https://github.com/brianleach/covergen/blob/main/docs/SUPPORT.md">Support matrix</a>
+    <a href="https://github.com/brianleach/covergen/blob/main/LICENSE">MIT license</a>
+  </p>
+</header>
+
+<h2>The gate</h2>
+<p>A generated test is worth nothing if it only moves a percentage. Every candidate has to pass
+all five of these before it is written to a spec file:</p>
+<ol class="gates">
+  <li><b>It builds.</b><span>A candidate that does not compile or load is dropped before it costs a test run.</span></li>
+  <li><b>It passes k times in a row.</b><span>Default <code>gate.k</code> is 3 consecutive runs, so a test that only passes sometimes is rejected as flaky rather than merged.</span></li>
+  <li><b>It strictly raises line coverage.</b><span>Measured against a baseline of the repo's own suite. A candidate that covers nothing new is rejected, however good it looks.</span></li>
+  <li><b>It passes the repo's own checks.</b><span>Whatever the project already gates on, lint, type checks, or any other validate command, runs against the new test too.</span></li>
+  <li><b>It catches a planted bug.</b><span>covergen breaks the lines the test just covered, one change at a time, and the test has to notice at least one of them. This is the gate that separates a real test from an assertion that passes whatever the code did.</span></li>
+</ol>
+
+<h2>Install and first run</h2>
+<pre>npm i -g covergen
+covergen --help</pre>
+<p class="note">Node 22 or newer. Generation runs on a Claude subscription by default, so no API key
+is needed until you switch to <code>generator: api</code>.</p>
+
+<h3>Point it at a repo</h3>
+<p>Write a <code>covergen.yaml</code> next to the repos you want covered. One entry per repo:</p>
+<pre>generator: claude-code     # a Claude subscription, the default
+gate:
+  k: 3                     # consecutive passing runs required
+mutation:
+  enabled: true            # plant bugs on the lines a test covers
+  min_killed: 1            # catch fewer than this and the test is rejected
+repos:
+  - name: node-api
+    root: ../node-api
+    runner: vitest
+    sources: ["src/**/*.ts"]</pre>
+
+<h3>Check the ground before spending a token</h3>
+<pre>covergen preflight --repo node-api</pre>
+<p class="note"><code>preflight</code> is offline and answers in about a second: it says whether the
+repo can produce lcov at all, and what is missing when it cannot. Then
+<code>covergen sweep --repo node-api --pr</code> generates, gates, and opens a draft pull request
+with whatever survived.</p>
+
+<h2>What a generated pull request looks like</h2>
+<p>Every number in the body comes from a real gate run, so the pull request is the audit trail a
+reviewer reads before approving. Rejected candidates are listed too, with the bugs they let
+through. Example, file names synthetic:</p>
+
+<div class="pr">
+  <p class="prtitle">covergen: 2 tests accepted in node-api</p>
+  <p class="headline">Tests that catch regressions: caught 7 of 9 planted bugs (78%).</p>
+  <p>3 source files targeted, 5 candidates generated, 2 accepted in 412.6s.<br>
+  Line coverage over the repo's sources: 61.4% before, 68.2% after.</p>
+
+  <h4>Accepted tests</h4>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Spec</th><th>Symbol</th><th>Lines newly covered</th><th>Before</th><th>After</th><th>Planted bugs caught</th><th>Assertions</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/__tests__/retry.test.ts</code></td><td><code>withRetry</code></td><td>5 (22, 23, 24, 25, 26)</td><td>41.2%</td><td>76.5%</td><td>4/5</td><td>toBe, toThrow, toHaveBeenCalledTimes</td></tr>
+      <tr><td><code>src/__tests__/parse-window.test.ts</code></td><td><code>parseWindow</code></td><td>4 (14, 15, 16, 17)</td><td>52.0%</td><td>84.0%</td><td>3/4</td><td>toEqual, toThrow</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Rejected candidates</h4>
+  <ul>
+    <li><b>weak assertions</b> (2)
+      <ul>
+        <li><code>formatWindow</code> in <code>src/__tests__/format-window.test.ts</code>
+          <ul>
+            <li>survived: line 48, comparison <code>&gt;=</code> replaced with <code>&gt;</code></li>
+            <li>survived: line 51, return value replaced with null</li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+    <li><b>no coverage gain</b> (1)
+      <ul><li><code>clampWindow</code> in <code>src/__tests__/clamp-window.test.ts</code></li></ul>
+    </li>
+  </ul>
+
+  <h4>Token usage</h4>
+  <p>input 184,320, output 12,905, cache read 921,600, cache write 24,110<br>
+  billed to a Claude subscription (generator: claude-code), no dollar figure</p>
+
+  <hr>
+  <p class="note">Every test in this PR was generated by a model and kept only because it built,
+  passed the gate repeatedly, and strictly raised line coverage. No model runs in CI. Review these
+  tests exactly as you would any hand-written code: check that the assertions describe intended
+  behavior and not just current behavior.</p>
+</div>
+
+<h2>Runners</h2>
+<p>covergen never instruments anything itself. It runs the repo's own test runner and reads the
+lcov that runner writes. Each row below is backed by a committed fixture the test suite runs, or
+by a read-only dry run against a real repository. The full evidence, including what each repo has
+to install first, is in the <a href="https://github.com/brianleach/covergen/blob/main/docs/SUPPORT.md">support matrix</a>.</p>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Runner</th><th>Language</th><th>Status</th><th>Known gap</th></tr></thead>
+  <tbody>
+    <tr><td><code>vitest</code></td><td>TypeScript, ESM</td><td>works</td><td>Monorepos supported. Component targets need a DOM environment installed</td></tr>
+    <tr><td><code>jest</code></td><td>JavaScript, CommonJS</td><td>works</td><td>Proven on plain CommonJS; a repo with a transform pipeline is untried</td></tr>
+    <tr><td><code>bun</code></td><td>TypeScript, ESM</td><td>works</td><td>No whole-project baseline: a source file no test loads is missing from the map rather than reported at zero</td></tr>
+    <tr><td><code>pytest</code></td><td>Python</td><td>works</td><td>Coverage cannot be narrowed to one file, so a gate run measures the whole package</td></tr>
+    <tr><td><code>go</code></td><td>Go</td><td>works</td><td>Statement coverage projected onto lines; tests are selected by package</td></tr>
+    <tr><td><code>cargo</code></td><td>Rust</td><td>works</td><td>Tests are selected by crate, and <code>#[cfg(test)]</code> lines are stripped from the lcov to keep the gate honest</td></tr>
+    <tr><td><code>rspec</code></td><td>Ruby</td><td>unproven in this environment</td><td>Needs the SimpleCov opt-in that <code>preflight</code> prints; the fixture is skipped on a machine without a bundle</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Java, C#, PHP, Elixir and <code>node:test</code> are not supported yet. For each of
+them the coverage data is not the problem: what is missing is a runner adapter of about a hundred
+lines plus an idiom pack so generated tests match the ecosystem's conventions.</p>
+
+<h2>Read more</h2>
+<ul>
+  <li><a href="https://github.com/brianleach/covergen">Source on GitHub</a></li>
+  <li><a href="https://www.npmjs.com/package/covergen">covergen on npm</a></li>
+  <li><a href="https://github.com/brianleach/covergen/blob/main/docs/DESIGN.md">Design notes</a>, how the pipeline and the gate are put together</li>
+  <li><a href="https://github.com/brianleach/covergen/blob/main/docs/SUPPORT.md">Support matrix</a>, what runs where and the evidence behind each claim</li>
+  <li><a href="https://github.com/brianleach/covergen/blob/main/LICENSE">LICENSE</a></li>
+</ul>
+
+<footer>
+  MIT licensed. Brian Leach.
+</footer>
+
+</div>
+</body>
+</html>

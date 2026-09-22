@@ -2,6 +2,8 @@
 
 [![ci](https://github.com/brianleach/covergen/actions/workflows/ci.yml/badge.svg)](https://github.com/brianleach/covergen/actions/workflows/ci.yml)
 
+What it is, in thirty seconds: https://brianleach.github.io/covergen/
+
 Coverage-gated LLM test generation. covergen points at a sibling repo, finds
 uncovered lines, asks Claude for candidate tests, and keeps only the candidates
 that build, pass `gate.k` times in a row, strictly raise line coverage, pass the
