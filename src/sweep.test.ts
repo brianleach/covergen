@@ -7,7 +7,8 @@ import { ceilingHit, createLimits, parseCeiling, type RunLimits } from "./limits
 import { createLogger } from "./logger.js";
 import { newJournal, specFileHash, type RunJournal } from "./journal.js";
 import { openDraftPrs, type CmdExec } from "./pr.js";
-import { openPrFromJournal, reportLines, sweepAll, writeReport, type SweepAllArgs } from "./sweep.js";
+import { RunFailed } from "./pipeline.js";
+import { openPrFromJournal, reportLines, runFields, sweepAll, writeReport, type SweepAllArgs } from "./sweep.js";
 import type { Candidate, RepoConfig, RunSummary } from "./types.js";
 
 const log = createLogger({ level: "silent" });
@@ -51,6 +52,21 @@ function summaryFor(repo: string, accepted: number): RunSummary {
     accepted: candidates.filter((c) => c.status === "accepted"),
     tokens: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 },
     durationMs: 10,
+  };
+}
+
+/** The reasons `rejectionSummary` was gated into, as the report counts them. */
+const REASONS = { no_coverage_gain: 3, test_failed: 2, weak_assertions: 1 };
+
+/** One finished run that accepted nothing and holds three different rejection reasons. */
+function rejectionSummary(): RunSummary {
+  const base = summaryFor("r1", 0);
+  const first = base.candidates[0] as Candidate;
+  const statuses = Object.entries(REASONS).flatMap(([status, count]) => Array.from({ length: count }, () => status));
+  return {
+    ...base,
+    candidates: statuses.map((status, i) => ({ ...first, specPath: `src/a${i}.test.ts`, status }) as Candidate),
+    accepted: [],
   };
 }
 
@@ -232,6 +248,25 @@ describe("sweepAll", () => {
     (summary.candidates[1] as { status: string }).status = "declaration_snapshot";
     const report = await sweepAll(args(config, { runOne: vi.fn(async () => summary) }));
     expect(report.repos[0]?.rejected).toEqual({ declaration_snapshot: 1 });
+  });
+
+  it("reports the same reasons for one repo swept alone as for every repo at once", async () => {
+    const config = await workspace();
+    const summary = rejectionSummary();
+    const report = await sweepAll(args(config, { runOne: vi.fn(async () => summary) as unknown as SweepAllArgs["runOne"] }));
+    expect(report.repos[0]?.rejected).toEqual(REASONS);
+    // `sweep --repo` writes its one row through runFields rather than through the
+    // loop above, so the two entry points are held to the same counts here.
+    expect(runFields(summary).rejected).toEqual(REASONS);
+  });
+
+  it("keeps the reasons on a repo whose run gated its candidates and then failed", async () => {
+    const config = await workspace();
+    const failing = vi.fn(async () => {
+      throw new RunFailed("combined accepted specs failed on run 1 of 3", rejectionSummary());
+    });
+    const report = await sweepAll(args(config, { runOne: failing as unknown as SweepAllArgs["runOne"] }));
+    expect(report.repos[0]).toMatchObject({ status: "failed", accepted: 0, rejected: REASONS });
   });
 });
 

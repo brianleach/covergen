@@ -769,7 +769,9 @@ nightly examples below use `--limit 5` for that reason.
 `--report <path>` writes one JSON file per run: start and end times, the ceiling
 that stopped it if one did, and per repo the targets attempted, tests accepted,
 rejected candidates by reason, tokens spent, and the reason nothing ran when
-nothing did. The same thing goes to stdout at the end, one line per repo.
+nothing did. The same thing goes to stdout at the end, one line per repo. A repo
+that failed after its candidates were gated still reports why each one was
+rejected, so the JSON says what that checkout's `last-run.md` says.
 
 Two of those fields are the quality record, and they are stable names meant to be
 read by whatever keeps the coverage ledger:

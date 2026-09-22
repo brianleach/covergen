@@ -18,7 +18,7 @@ import { changedFiles, listSources, matchesSources, toCwdRelative } from "./git.
 import { driftedSpecs, journalBody, journalTitle, type RunJournal } from "./journal.js";
 import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js";
 import type { Logger } from "./logger.js";
-import { orderTargetsByGap, orderTargetsByValue, runPipeline } from "./pipeline.js";
+import { orderTargetsByGap, orderTargetsByValue, RunFailed, runPipeline } from "./pipeline.js";
 import { dirtyPaths, openDraftPrs } from "./pr.js";
 import type { RepoConfig, RunSummary } from "./types.js";
 
@@ -139,6 +139,11 @@ export interface SweepAllArgs extends Omit<TargetArgs, "repo"> {
   dirty?: typeof dirtyPaths;
 }
 
+/**
+ * Rejected candidates by reason, from the same array the markdown groups. Every
+ * report row that has a summary goes through this, so the JSON and last-run.md
+ * cannot disagree about why a repo landed nothing.
+ */
 function countRejected(summary: RunSummary): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of summary.candidates) if (c.status !== "accepted") out[c.status] = (out[c.status] ?? 0) + 1;
@@ -179,6 +184,8 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
     // next repo would only buy work it cannot finish.
     if (abortedBy) break;
     const repoStarted = Date.now();
+    /** This repo's finished run, kept so a failure after it still reports what the gate decided. */
+    let ran: RunSummary | undefined;
     const add = (report: Omit<RepoReport, "durationMs">): void => {
       repos.push({ ...report, durationMs: Date.now() - repoStarted });
     };
@@ -265,6 +272,7 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         baseSha,
         limits,
       });
+      ran = summary;
       abortedBy = summary.aborted;
       const base = {
         repo: repo.name,
@@ -302,7 +310,12 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       log.error({ repo: repo.name, err: reason }, "repo failed, continuing with the next one");
-      add({ ...empty, status: "failed", reason });
+      // A repo can fail after its candidates were gated: the combined specs did
+      // not pass together, or opening the PR did. The run landed nothing either
+      // way, but the reasons are known and last-run.md already lists them, so
+      // the row says them too rather than an empty map that reads as "no work".
+      const gated = ran ?? (err instanceof RunFailed ? err.summary : undefined);
+      add({ ...empty, rejected: gated ? countRejected(gated) : {}, status: "failed", reason });
     }
   }
 
