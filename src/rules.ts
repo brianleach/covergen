@@ -59,9 +59,12 @@ function has(code: string, pattern: RegExp): boolean {
   return pattern.test(code);
 }
 
-/** Any recognizable assertion, in either language family. */
+/**
+ * Any recognizable assertion, in either language family. `assert[A-Z]\w*(` is
+ * Python unittest's camelCase family (self.assertEqual, assertRaises, assertIn).
+ */
 const ASSERTION =
-  /\bexpect\s*\(|\bexpect\s*\{|\bassert[._(!]|\bassert\s+\S|\bis_expected\b|\.should\b|\bexpect\(.+\)\.to\b|\bt\.(?:Error|Errorf|Fatal|Fatalf)\s*\(/;
+  /\bexpect\s*\(|\bexpect\s*\{|\bassert[._(!]|\bassert[A-Z]\w*\(|\bassert\s+\S|\bis_expected\b|\.should\b|\bexpect\(.+\)\.to\b|\bt\.(?:Error|Errorf|Fatal|Fatalf)\s*\(/;
 
 /** Test doubles / stubs that make an otherwise-live call hermetic. */
 const STUB = /stub_request|WebMock|webmock|vi\.mock|vi\.spyOn|vi\.stubGlobal|jest\.mock|jest\.spyOn|mock\.module|spyOn\s*\(|nock\s*\(|msw|setupServer|fetchMock|mockResolvedValue|mockImplementation|allow\s*\(|instance_double|double\s*\(|monkeypatch\.|mocker\.|MagicMock|unittest\.mock|\bpatch\s*\(|\bresponses\b|httptest\./;
@@ -146,7 +149,7 @@ export function guardsPlatform(code: string): boolean {
  */
 
 /** Where an assertion starts. Global: a line can hold more than one. */
-const ASSERTION_START = /\bexpect\s*[({]|\bassert[._(!]|\bassert\s+\S|\bis_expected\b|\.should\b|\bt\.(?:Error|Errorf|Fatal|Fatalf)\s*\(/g;
+const ASSERTION_START = /\bexpect\s*[({]|\bassert[._(!]|\bassert[A-Z]\w*\(|\bassert\s+\S|\bis_expected\b|\.should\b|\bt\.(?:Error|Errorf|Fatal|Fatalf)\s*\(/g;
 const SELF_COMPARISON =
   /expect\s*\(\s*([^()]+?)\s*\)\s*\.\s*(?:toBe|toEqual|toStrictEqual)\s*\(\s*([^()]+?)\s*\)|expect\s*\(\s*([^()]+?)\s*\)\s*\.\s*to\s+(?:eq|eql|equal|be)\s*\(\s*([^()]+?)\s*\)/;
 
@@ -166,7 +169,7 @@ export function matcherOf(text: string): string | undefined {
   // reported name is the call itself.
   const go = text.match(/\bt\.(Errorf?|Fatalf?)\s*\(/);
   if (go) return `t.${go[1] as string}`;
-  const bare = text.match(/\b(assert_[a-z_]+|assert)\b/);
+  const bare = text.match(/\b(assert_[a-z_]+|assert[A-Z]\w*|assert)\b/);
   return bare ? (bare[1] as string) : undefined;
 }
 
@@ -366,7 +369,7 @@ export const rules: Rule[] = [
       // any surplus expect() is a real assertion.
       const expectations = c.match(/\bexpect\s*[({]/g)?.length ?? 0;
       if (expectations > snapshots) return null;
-      if (has(c, /\bassert[._(]|\bassert\s+\S|\bis_expected\b|\.should\b/)) return null;
+      if (has(c, /\bassert[._(]|\bassert[A-Z]\w*\(|\bassert\s+\S|\bis_expected\b|\.should\b/)) return null;
       return "snapshot is the only assertion; add an assertion on real behavior";
     },
   },

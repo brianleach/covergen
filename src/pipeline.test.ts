@@ -325,6 +325,45 @@ describe("runPipeline", () => {
     expect(next.candidates).toHaveLength(1);
   });
 
+  it("lets a repo override the per-file ceiling in either direction", async () => {
+    const repo = await fixtureRepo();
+    await mkdir(join(repo.cwd, "spec/services"), { recursive: true });
+    await writeFile(join(repo.cwd, SPEC), "# line\n".repeat(60), "utf8");
+    const sweep = { max_tokens_per_run: 0, max_minutes: 0, pr_max_lines: 600, pr_max_lines_per_file: 50 };
+    h.generate.mockResolvedValue(candidate({ wholeFile: false }));
+
+    const raised = await run({ ...repo, prMaxLinesPerFile: 100 }, { cfg: { sweep } as Partial<Config> });
+    expect(raised.candidates).toHaveLength(1);
+
+    const lowered = await run({ ...repo, prMaxLinesPerFile: 40 }, { cfg: { sweep: { ...sweep, pr_max_lines_per_file: 0 } } as Partial<Config> });
+    expect(lowered.candidates).toHaveLength(0);
+  });
+
+  it("writes into an explicit spec template and keeps the nearest spec only as the style example", async () => {
+    const repo = await fixtureRepo();
+    const legacy = "spec/legacy_spec.rb";
+    await mkdir(join(repo.cwd, "spec"), { recursive: true });
+    await writeFile(join(repo.cwd, legacy), "# hand written\n".repeat(600), "utf8");
+    h.findNearestSpec.mockResolvedValue(legacy);
+    const sweep = { max_tokens_per_run: 0, max_minutes: 0, pr_max_lines: 600, pr_max_lines_per_file: 500 };
+    h.generate.mockResolvedValue(candidate({ wholeFile: true }));
+
+    const summary = await run({ ...repo, specTemplateExplicit: true }, { cfg: { sweep } as Partial<Config> });
+    expect(summary.candidates).toHaveLength(1);
+    const prompt = (h.buildPromptBlocks.mock.calls[0] as unknown as [{ specPath: string; nearestSpecPath?: string; wholeFile: boolean }])[0];
+    expect(prompt.specPath).toBe(SPEC);
+    expect(prompt.nearestSpecPath).toBe(legacy);
+    expect(prompt.wholeFile).toBe(true);
+
+    // Without an explicit template the nearest spec wins, and here it is over the ceiling.
+    vi.clearAllMocks();
+    h.buildSegments.mockReturnValue([segment(1)]);
+    h.findNearestSpec.mockResolvedValue(legacy);
+    const fallback = await run(repo, { cfg: { sweep } as Partial<Config> });
+    expect(h.buildSegments).not.toHaveBeenCalled();
+    expect(fallback.candidates).toHaveLength(0);
+  });
+
   it("passes the mutation settings to the gate and carries the tally onto the candidate", async () => {
     const repo = await fixtureRepo();
     const mutation = { tried: 3, killed: 2, survivors: [{ id: "m2-boolean", line: 2, description: "boolean: true to false" }] };

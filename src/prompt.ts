@@ -152,7 +152,15 @@ export function buildPromptBlocks(args: BuildPromptArgs): PromptBlocks {
 
   const spec =
     args.nearestSpecPath && args.nearestSpecText !== undefined
-      ? [`Existing spec at ${args.nearestSpecPath}. Match its style, helpers, and setup:`, "", "```", args.nearestSpecText, "```"].join("\n")
+      ? [
+          `Existing spec at ${args.nearestSpecPath}. Match its style, helpers, and setup:`,
+          "",
+          "```",
+          args.nearestSpecText,
+          "```",
+          // A configured spec template can point past the nearest spec.
+          ...(args.nearestSpecPath !== specPath ? ["", `That file is a style example only. Your tests go in ${specPath}.`] : []),
+        ].join("\n")
       : [
           `There is no existing spec for ${args.sourcePath}.`,
           `You are writing a complete new spec file at ${specPath}, so include every require/import and the top-level describe block.`,

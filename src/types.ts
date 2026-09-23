@@ -87,6 +87,18 @@ export interface RepoConfig {
   exclude?: string[];
   /** Given a source path relative to cwd, the conventional spec path relative to cwd. */
   specPath: (relSource: string) => string;
+  /**
+   * True when the config names `spec_template` itself. Then `specPath` wins over
+   * the nearest existing spec, which stays only as the prompt's style example.
+   */
+  specTemplateExplicit?: boolean;
+  /** Overrides `sweep.pr_max_lines_per_file` for this repo. 0 disables the ceiling. */
+  prMaxLinesPerFile?: number;
+  /**
+   * Language the mutation spot-check treats every source as, over the extension
+   * and the shebang. For sources whose name says nothing about their language.
+   */
+  language?: "ruby" | "js" | "python" | "go" | "rust";
   /** Idiom pack markdown, loaded verbatim into the stable prompt block. */
   idiomPackPath?: string;
   /** Overrides the top-level generator backend for this repo. */

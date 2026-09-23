@@ -321,6 +321,7 @@ export async function evaluate(args: EvaluateArgs): Promise<GateResult> {
     // operators run out of applicable edits.
     const mutants = generateMutants({
       path: sourceRel,
+      language: repo.language,
       source: originalSource,
       lines: delta.newlyCovered,
       max: mutation.maxMutants * MUTANT_ATTEMPT_FACTOR,

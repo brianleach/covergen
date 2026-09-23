@@ -260,7 +260,7 @@ async function plantBugs(repo: RepoConfig, runner: Runner, spec: string, filter:
     } catch {
       continue;
     }
-    const bugs = generateMutants({ path, source: original, lines, max: max - planted });
+    const bugs = generateMutants({ path, language: repo.language, source: original, lines, max: max - planted });
     if (bugs.length === 0) continue;
     try {
       for (const bug of bugs) {

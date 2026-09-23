@@ -276,7 +276,9 @@ falls back to the pack of the same name bundled with covergen.
 | `runner` | yes | `rspec`, `vitest`, `bun`, `jest`, `pytest`, `go` or `cargo`. An entry with `sweep: false` may name a runner this build does not have: it loads with a one-line warning instead of failing the whole config |
 | `cwd` | no, default `.` | Working directory inside `root`, for example `apps/web` in a monorepo |
 | `sources` | yes | Globs for source files eligible for generation |
-| `spec_template` | no | Where the spec for a source file lives. See below |
+| `spec_template` | no | Where the spec for a source file lives. When set, it wins over an existing nearby spec. See below |
+| `pr_max_lines_per_file` | no, default the top-level `sweep.pr_max_lines_per_file` | That ceiling for this repo only, higher or lower. `0` disables it |
+| `language` | no | `python`, `js`, `ruby`, `go` or `rust`. The language the mutation spot-check treats every source as, over the file extension and the shebang |
 | `idiom_pack` | no | Markdown loaded verbatim into the stable prompt block |
 | `generator` | no | `api` or `claude-code` for this repo only, overriding the top-level setting |
 | `sweep` | no, default `true` | `false` leaves the repo out of `sweep --all`. `--repo <name>` still works |
@@ -311,6 +313,18 @@ Defaults per runner:
 | pytest | `tests/{dir_sans_src}/test_{base}.py` |
 | go | `{dir}/{base}_test.go` |
 | cargo | `{dir}/{base}{ext}`, the source file itself |
+
+Without a `spec_template` in the config, a spec that already exists near the
+source (the default path or a sibling naming convention) is where new tests go.
+A `spec_template` the config states explicitly wins over that: tests go to the
+template's path, and the nearby spec is only shown to the model as the style
+to match. That is the way out for a repo whose one hand-written test file is
+already past the per-file ceiling.
+
+Mutation operators are picked by file extension. A source with no extension,
+such as a script run by its shebang, falls back to the interpreter the `#!` line
+names (`python`, `node`, `ruby`); a shell shebang has no operators. The per-repo
+`language` key wins over both.
 
 ### The mutation block
 

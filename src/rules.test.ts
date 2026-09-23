@@ -179,6 +179,21 @@ describe("has-assertion", () => {
   it("accepts rspec is_expected and should forms", () => {
     expect(ids(check("it { is_expected.to be_valid }", "rspec"))).not.toContain("has-assertion");
   });
+
+  it("accepts python unittest camelCase assertions", () => {
+    const equal = "class T(unittest.TestCase):\n    def test_total(self):\n        self.assertEqual(total([1, 2]), 3)\n";
+    expect(ids(check(equal, "pytest"))).not.toContain("has-assertion");
+    const raises = "class T(unittest.TestCase):\n    def test_bad(self):\n        with self.assertRaises(ValueError):\n            total(None)\n";
+    expect(ids(check(raises, "pytest"))).not.toContain("has-assertion");
+  });
+
+  it("still accepts a bare python assert", () => {
+    expect(ids(check("def test_total():\n    assert total([1, 2]) == 3\n", "pytest"))).not.toContain("has-assertion");
+  });
+
+  it("does not read a name that merely starts with assert as an assertion", () => {
+    expect(ids(check("def test_x():\n    assertion_count = run(1)\n", "pytest"))).toContain("has-assertion");
+  });
 });
 
 describe("stripLineComments", () => {
@@ -379,6 +394,7 @@ describe("matcherOf", () => {
     const goTest = 'if got := Add(1, 2); got != 3 {\n  t.Errorf("Add(1, 2) = %d", got)\n}';
     expect(assertionKinds(goTest)).toEqual(["t.Errorf"]);
     expect(assertionKinds("assert_equal 3, add(1, 2)")).toEqual(["assert_equal"]);
+    expect(assertionKinds("self.assertEqual(add(1, 2), 3)\nself.assertIn(1, xs)")).toEqual(["assertEqual", "assertIn"]);
   });
 });
 

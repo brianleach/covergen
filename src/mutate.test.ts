@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateMutants, langFor, maskLine, type Mutant } from "./mutate.js";
+import { generateMutants, langFor, langFromShebang, maskLine, type Mutant } from "./mutate.js";
 
 const RUBY = [
   "class Charger",                                   // 1
@@ -79,6 +79,41 @@ describe("langFor", () => {
     expect(langFor("cmd/api/main.go")).toBe("go");
     expect(langFor("src/rates.rs")).toBe("rust");
     for (const p of ["a.java", "Makefile"]) expect(langFor(p)).toBeUndefined();
+  });
+
+  it("falls back to the shebang for a file with no extension", () => {
+    expect(langFor("bin/report", "#!/usr/bin/env python3\nprint(1)\n")).toBe("python");
+    expect(langFor("bin/serve", "#!/usr/bin/env node\n")).toBe("js");
+    expect(langFor("bin/tool", "#!/usr/bin/python\n")).toBe("python");
+    expect(langFor("bin/run", "#!/bin/bash\necho hi\n")).toBeUndefined();
+    expect(langFor("bin/plain", "print(1)\n")).toBeUndefined();
+    // An extension still decides when there is one.
+    expect(langFor("a.rb", "#!/usr/bin/env python3\n")).toBe("ruby");
+  });
+
+  it("lets a configured language win over the extension and the shebang", () => {
+    expect(langFor("bin/report", "#!/usr/bin/env node\n", "python")).toBe("python");
+    expect(langFor("a.txt", undefined, "ruby")).toBe("ruby");
+  });
+});
+
+describe("langFromShebang", () => {
+  it("reads the interpreter after env, skipping flags", () => {
+    expect(langFromShebang("#!/usr/bin/env -S python3 -u\n")).toBe("python");
+    expect(langFromShebang("#!/usr/local/bin/ruby\n")).toBe("ruby");
+    expect(langFromShebang("# not a shebang\n")).toBeUndefined();
+  });
+});
+
+describe("generateMutants: extensionless and configured sources", () => {
+  it("mutates an extensionless python script by its shebang", () => {
+    const script = `#!/usr/bin/env python3\n${PY}`;
+    expect(mutate("bin/charge", script, [3]).length).toBeGreaterThan(0);
+  });
+
+  it("mutates a file under the configured language", () => {
+    expect(generateMutants({ path: "bin/charge", language: "python", source: PY, lines: [2], max: 50 }).length).toBeGreaterThan(0);
+    expect(mutate("bin/charge", PY, [2])).toEqual([]);
   });
 });
 
