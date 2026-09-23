@@ -91,6 +91,34 @@ describe("loadConfig", () => {
   });
 });
 
+describe("per-repo language, spec ceiling and template keys", () => {
+  const write = (extra: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "covergen-"));
+    const path = join(dir, "covergen.yaml");
+    writeFileSync(path, `repos:\n  - name: py\n    root: ../py\n    runner: pytest\n    sources: ["bin/*"]\n${extra}`);
+    return path;
+  };
+
+  test("reads language, pr_max_lines_per_file and an explicit spec_template", () => {
+    const repo = findRepo(loadConfig(write(`    language: python\n    pr_max_lines_per_file: 2000\n    spec_template: "tests/test_{base}_generated.py"\n`)), "py");
+    expect(repo.language).toBe("python");
+    expect(repo.prMaxLinesPerFile).toBe(2000);
+    expect(repo.specTemplateExplicit).toBe(true);
+    expect(repo.specPath("bin/report")).toBe("tests/test_report_generated.py");
+  });
+
+  test("leaves all three unset by default, so the global ceiling and the nearest spec apply", () => {
+    const repo = findRepo(loadConfig(write("")), "py");
+    expect(repo.language).toBeUndefined();
+    expect(repo.prMaxLinesPerFile).toBeUndefined();
+    expect(repo.specTemplateExplicit).toBe(false);
+  });
+
+  test("rejects a language the mutation operators do not cover", () => {
+    expect(() => loadConfig(write("    language: bash\n"))).toThrow();
+  });
+});
+
 describe("cargo and mutation keys on a repo entry", () => {
   test("reads cargo.packages and allow_no_mutants, and defaults both", () => {
     const dir = mkdtempSync(join(tmpdir(), "covergen-"));

@@ -60,6 +60,10 @@ const RepoSchema = z.object({
   exclude: z.array(z.string()).default([]),
   /** Template: "{dir}/{base}.test{ext}" or "spec/{dir}/{base}_spec.rb". {dir} is the source dir relative to cwd. */
   spec_template: z.string().optional(),
+  /** Overrides sweep.pr_max_lines_per_file for this repo. 0 disables the ceiling. */
+  pr_max_lines_per_file: z.number().int().min(0).optional(),
+  /** Language for the mutation spot-check, over the extension and the shebang. */
+  language: z.enum(["ruby", "js", "python", "go", "rust"]).optional(),
   idiom_pack: z.string().optional(),
   /** Overrides the top-level `generator` for this repo only. */
   generator: z.enum(generatorBackends).optional(),
@@ -317,6 +321,9 @@ export function loadConfig(path: string): Config {
         if (template === undefined) throw new Error(`Unknown runner "${r.runner}" for repo "${r.name}"; no spec path template for it.`);
         return specPathFromTemplate(template, rel);
       },
+      specTemplateExplicit: r.spec_template !== undefined,
+      prMaxLinesPerFile: r.pr_max_lines_per_file,
+      language: r.language,
       idiomPackPath: r.idiom_pack ? resolveIdiomPack(configDir, r.idiom_pack) : undefined,
       generator: r.generator,
       sweep: r.sweep,

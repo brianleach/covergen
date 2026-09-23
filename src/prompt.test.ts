@@ -143,6 +143,18 @@ describe("buildPromptBlocks", () => {
     expect(blocks.semiStable).toContain("RSpec.describe Charger do");
   });
 
+  it("marks a nearest spec that is not the target as a style example only", () => {
+    const blocks = buildPromptBlocks({
+      ...baseArgs,
+      nearestSpecPath: "tests/test_legacy.py",
+      nearestSpecText: "class T(unittest.TestCase): pass",
+      wholeFile: true,
+    });
+    expect(blocks.semiStable).toContain("style example only. Your tests go in spec/services/charger_spec.rb");
+    const same = buildPromptBlocks({ ...baseArgs, nearestSpecPath: "spec/services/charger_spec.rb", nearestSpecText: "x" });
+    expect(same.semiStable).not.toContain("style example only");
+  });
+
   it("says a whole new file is needed when no spec exists", () => {
     const blocks = buildPromptBlocks({ ...baseArgs, wholeFile: true });
     expect(blocks.semiStable).toContain("There is no existing spec");

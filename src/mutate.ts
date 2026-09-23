@@ -17,7 +17,7 @@
  *    never has to re-derive the edit
  */
 
-import { extname } from "node:path";
+import { basename, extname } from "node:path";
 
 export interface Mutant {
   /** Stable within one call: `m<line>-<operator>`. */
@@ -35,6 +35,8 @@ export type MutationLang = "ruby" | "js" | "python" | "go" | "rust";
 export interface GenerateMutantsArgs {
   /** Source path, used only to pick the language. */
   path: string;
+  /** The repo's configured language. Wins over the extension and the shebang. */
+  language?: MutationLang;
   source: string;
   /** 1-based line numbers eligible for mutation (the candidate's newly covered lines). */
   lines: number[];
@@ -42,14 +44,39 @@ export interface GenerateMutantsArgs {
   max: number;
 }
 
-/** Undefined for an extension we have no operators for; that file yields no mutants. */
-export function langFor(path: string): MutationLang | undefined {
+/**
+ * The language to mutate `path` as: a configured `language` first, then the file
+ * extension, then, for a file with no extension, the interpreter its shebang names.
+ * Undefined when none of those is one we have operators for; that file yields no
+ * mutants.
+ */
+export function langFor(path: string, source?: string, language?: MutationLang): MutationLang | undefined {
+  if (language) return language;
   const ext = extname(path).toLowerCase();
   if (ext === ".rb") return "ruby";
   if (ext === ".py") return "python";
   if (ext === ".go") return "go";
   if (ext === ".rs") return "rust";
   if (ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx") return "js";
+  if (ext === "" && source !== undefined) return langFromShebang(source);
+  return undefined;
+}
+
+/**
+ * The language a `#!` first line names, e.g. `#!/usr/bin/env python3` or
+ * `#!/usr/bin/node`. Shells have no operators here, so `#!/bin/bash` is undefined.
+ */
+export function langFromShebang(source: string): MutationLang | undefined {
+  const first = source.split("\n", 1)[0] ?? "";
+  if (!first.startsWith("#!")) return undefined;
+  // The interpreter is the last path segment of the program, or the first
+  // argument after `env` (skipping flags such as `-S`).
+  const words = first.slice(2).trim().split(/\s+/);
+  let program = basename(words[0] ?? "");
+  if (program === "env") program = basename(words.slice(1).find((w) => !w.startsWith("-") && !w.includes("=")) ?? "");
+  if (/^python[\d.]*$/.test(program)) return "python";
+  if (/^(?:node|nodejs|bun|deno|tsx|ts-node)$/.test(program)) return "js";
+  if (/^ruby[\d.]*$/.test(program)) return "ruby";
   return undefined;
 }
 
@@ -338,7 +365,7 @@ const OPERATORS: [string, Operator][] = [
  * lines are byte identical.
  */
 export function generateMutants(args: GenerateMutantsArgs): Mutant[] {
-  const lang = langFor(args.path);
+  const lang = langFor(args.path, args.source, args.language);
   if (!lang || args.max <= 0) return [];
 
   const lines = args.source.split("\n");

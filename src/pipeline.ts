@@ -520,7 +520,9 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   for (const target of targets) {
     const nearest = await findNearestSpec(repo, target, exists);
     if (nearest) nearestFor.set(target, nearest);
-    specFor.set(target, nearest ?? repo.specPath(target));
+    // A template the config states wins; the nearest spec is then only the
+    // prompt's style example.
+    specFor.set(target, repo.specTemplateExplicit ? repo.specPath(target) : (nearest ?? repo.specPath(target)));
   }
   const originalSpecs = await snapshotSpecs(repo.cwd, specFor.values());
 
@@ -645,7 +647,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
       // not how many lines they add to its spec. A spec that has already reached
       // the per-file ceiling waits for the next run rather than growing past what
       // a reviewer will read in one sitting.
-      const perFileCap = config.sweep?.pr_max_lines_per_file ?? 0;
+      const perFileCap = repo.prMaxLinesPerFile ?? config.sweep?.pr_max_lines_per_file ?? 0;
       const specLinesBefore = await specFileLines(repo.cwd, specPath);
       if (specFileFull(specLinesBefore, perFileCap)) {
         log.info({ target, spec: specPath, lines: specLinesBefore, max: perFileCap }, "spec is at the per-file ceiling, leaving it for the next run");
