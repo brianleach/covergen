@@ -1,11 +1,31 @@
 /**
  * bun test runner. lcov via --coverage-reporter=lcov into a per-run directory.
- * No extra dependency is needed in the target repo.
+ * No extra dependency is needed in the target repo. bun has no coverage include
+ * flag, so COVERGEN_SOURCE narrows the lcov after the run instead.
  */
 
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { normalizePath } from "../lcov.js";
 import type { RepoConfig, RunOptions, RunResult, Runner } from "../types.js";
 import { coverageOutDir, resolveLcov, runCommand, withPrefix, type ExecFn } from "./exec.js";
+
+/**
+ * Keep only the lcov record for `source`, relative to cwd. bun reports every file the spec
+ * loaded, so without this a candidate that imports a second module gets that module's lines
+ * counted toward the target's delta. vitest and jest narrow with a coverage include glob;
+ * bun offers no such flag (bunfig.toml can only ignore paths), so the record is matched on
+ * its normalized path instead, which needs no glob escaping.
+ */
+function narrowLcov(lcovPath: string, source: string, cwd: string): void {
+  const target = normalizePath(source, { cwd });
+  const records = readFileSync(lcovPath, "utf8").split(/^end_of_record\r?$/m);
+  const kept = records.filter((record) => {
+    const sf = /^SF:(.*)$/m.exec(record)?.[1];
+    return sf !== undefined && normalizePath(sf, { cwd }) === target;
+  });
+  writeFileSync(lcovPath, kept.map((record) => `${record.replace(/^\r?\n/, "")}end_of_record\n`).join(""));
+}
 
 export function createBunRunner(exec: ExecFn = runCommand): Runner {
   return {
@@ -52,6 +72,8 @@ export function createBunRunner(exec: ExecFn = runCommand): Runner {
         const resolved = resolveLcov(lcovTarget);
         lcovPath = resolved.lcovPath;
         if (resolved.note) stderr += resolved.note;
+        const source = opts.env?.COVERGEN_SOURCE;
+        if (lcovPath && source) narrowLcov(lcovPath, source, repo.cwd);
       }
 
       return {

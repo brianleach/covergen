@@ -450,7 +450,8 @@ Every runner must emit lcov. `preflight` tells you what is missing.
   `[id]` before passing them, and targets under such a directory report
   coverage normally.
 - **bun test**: `bun --version` must work. Nothing else is needed; lcov is
-  requested on the command line.
+  requested on the command line. bun has no coverage include flag, so covergen
+  trims the lcov to the file under test after each gate run.
 - **Jest**: `node_modules/jest` must exist under the repo cwd or root. lcov is
   requested on the command line.
 - **Go**: `go version` must report 1.22 or newer, `go vet` must build the

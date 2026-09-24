@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findRepo, loadConfig } from "./config.js";
-import { discardCoverageDir, readLcov } from "./lcov.js";
+import { diffCoverage, discardCoverageDir, readLcov } from "./lcov.js";
 import { ruleViolations } from "./rules.js";
 import { getRunner } from "./runners/index.js";
 import { buildSegments } from "./segments.js";
@@ -201,6 +201,39 @@ describe("a source path with glob metacharacters", () => {
       try {
         const map = await readLcov(result.lcovPath!, { cwd: repo.cwd });
         expect(map.get(target), `${target} missing from the lcov, keys: ${[...map.keys()].join(", ")}`).toBeDefined();
+      } finally {
+        await discardCoverageDir(result.lcovPath!);
+      }
+    },
+    120_000,
+  );
+});
+
+/**
+ * bun has no coverage include flag, so the runner narrows the lcov itself. The
+ * spec here loads two sources; before the narrowing, src/slugs.ts came back in
+ * the map beside the target and its hits counted toward the gate's delta.
+ */
+describe("a bun spec that loads a second source file", () => {
+  const repo: RepoConfig = findRepo(config, "bun-lib");
+  const target = "src/pair/pad.ts";
+  const run = onPath("bun") ? it : it.skip;
+
+  run(
+    "reports coverage for the target file only",
+    async () => {
+      const result = await getRunner(repo.runner).run(repo, {
+        files: ["src/pair/pad.test.ts"],
+        coverage: true,
+        timeoutMs: config.gate.baseline_timeout_ms,
+        env: { COVERGEN_SOURCE: target },
+      });
+      expect(result.lcovPath, `no lcov:\n${result.stderr}\n${result.stdout}`).toBeTruthy();
+
+      try {
+        const map = await readLcov(result.lcovPath!, { cwd: repo.cwd });
+        expect([...map.keys()]).toEqual([target]);
+        expect(diffCoverage(new Map(), map, target).newlyCovered.length).toBeGreaterThan(0);
       } finally {
         await discardCoverageDir(result.lcovPath!);
       }
