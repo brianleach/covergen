@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RepoConfig } from "../types.js";
 import type { ExecOptions, ExecResult } from "./exec.js";
+import { parseLcov } from "../lcov.js";
 import { createBunRunner } from "./bun.js";
 
 interface Call {
@@ -11,7 +12,7 @@ interface Call {
   opts: ExecOptions;
 }
 
-function fakeExec(opts?: { exitCode?: number; stderr?: string; writeLcov?: boolean }) {
+function fakeExec(opts?: { exitCode?: number; stderr?: string; writeLcov?: boolean; lcov?: string }) {
   const calls: Call[] = [];
   const exec = async (cmd: string[], o: ExecOptions): Promise<ExecResult> => {
     calls.push({ cmd, opts: o });
@@ -19,7 +20,7 @@ function fakeExec(opts?: { exitCode?: number; stderr?: string; writeLcov?: boole
     if (dirArg && opts?.writeLcov !== false) {
       const dir = dirArg.slice("--coverage-dir=".length);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "lcov.info"), "TN:\nend_of_record\n");
+      writeFileSync(join(dir, "lcov.info"), opts?.lcov ?? "TN:\nend_of_record\n");
     }
     return { exitCode: opts?.exitCode ?? 0, stdout: "", stderr: opts?.stderr ?? "", durationMs: 3 };
   };
@@ -121,6 +122,37 @@ describe("bun run", () => {
     expect(res.ok).toBe(true);
     expect(res.lcovPath).toBeUndefined();
     expect(res.stderr).toContain("expected lcov at");
+  });
+
+  describe("with COVERGEN_SOURCE", () => {
+    const twoFiles = [
+      "TN:\nSF:src/a.ts\nDA:1,1\nDA:2,0\nLF:2\nLH:1\nend_of_record",
+      "TN:\nSF:src/b.ts\nDA:1,3\nLF:1\nLH:1\nend_of_record\n",
+    ].join("\n");
+    const opts = { files: ["src/a.test.ts"], coverage: true, timeoutMs: 1000 };
+
+    it("keeps only the target's record", async () => {
+      const { exec } = fakeExec({ lcov: twoFiles });
+      const res = await createBunRunner(exec).run(makeRepo(), { ...opts, env: { COVERGEN_SOURCE: "src/a.ts" } });
+      const map = parseLcov(readFileSync(res.lcovPath!, "utf8"), { cwd: root });
+      expect([...map.keys()]).toEqual(["src/a.ts"]);
+      expect([...map.get("src/a.ts")!.lines]).toEqual([
+        [1, 1],
+        [2, 0],
+      ]);
+    });
+
+    it("matches an absolute SF path against the cwd-relative source", async () => {
+      const { exec } = fakeExec({ lcov: twoFiles.replace("SF:src/a.ts", `SF:${join(root, "src/a.ts")}`) });
+      const res = await createBunRunner(exec).run(makeRepo(), { ...opts, env: { COVERGEN_SOURCE: "src/a.ts" } });
+      expect([...parseLcov(readFileSync(res.lcovPath!, "utf8"), { cwd: root }).keys()]).toEqual(["src/a.ts"]);
+    });
+
+    it("leaves every record when the env var is absent", async () => {
+      const { exec } = fakeExec({ lcov: twoFiles });
+      const res = await createBunRunner(exec).run(makeRepo(), opts);
+      expect([...parseLcov(readFileSync(res.lcovPath!, "utf8"), { cwd: root }).keys()]).toEqual(["src/a.ts", "src/b.ts"]);
+    });
   });
 
   it("maps exit code to ok", async () => {
