@@ -3,7 +3,7 @@
  * All paths are absolute unless a field name says otherwise.
  */
 
-export type RunnerName = "rspec" | "vitest" | "bun" | "jest" | "pytest" | "go" | "cargo";
+export type RunnerName = "rspec" | "vitest" | "bun" | "jest" | "pytest" | "go" | "cargo" | "node-test";
 
 /** The repo entry's `pytest:` block. `package` absent means derive `--cov` from `sources`. */
 export interface PytestOptions {
@@ -44,6 +44,16 @@ export interface CargoOptions {
   packages: string[];
   /** Extra arguments for the test harness, passed after `--`. */
   testArgs: string[];
+}
+
+/** The repo entry's `node_test:` block, for suites on Node's built-in test runner. */
+export interface NodeTestOptions {
+  /** argv that runs the suite, e.g. ["node","--import","tsx","--test"] or ["tsx","--test"]. */
+  command: string[];
+  /** Glob for test files, cwd-relative. The whole-suite run passes it to Node as is. */
+  testGlob: string;
+  /** Globs coverage is reported over. Absent means `sources`. */
+  coverageInclude?: string[];
 }
 
 /** Which backend makes the model calls: the metered API, or a Claude subscription. */
@@ -128,6 +138,8 @@ export interface RepoConfig {
   go?: GoOptions;
   /** Settings for the cargo runner. Ignored by every other runner. */
   cargo?: CargoOptions;
+  /** Settings for the node-test runner. Ignored by every other runner. */
+  nodeTest?: NodeTestOptions;
   /** Settings for explore mode. Absent means this repo has no explorable target. */
   explore?: ExploreOptions;
 }

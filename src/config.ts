@@ -14,7 +14,7 @@ import { DEFAULT_PRICE_PER_MTOK, type Price } from "./cost.js";
 import { ruleIds } from "./rules.js";
 import type { GeneratorBackend, RepoConfig, RunnerName } from "./types.js";
 
-const runnerNames = ["rspec", "vitest", "bun", "jest", "pytest", "go", "cargo"] as const;
+const runnerNames = ["rspec", "vitest", "bun", "jest", "pytest", "go", "cargo", "node-test"] as const;
 const generatorBackends = ["api", "claude-code"] as const;
 
 /** True when this build has an adapter for `value`. */
@@ -98,6 +98,15 @@ const RepoSchema = z.object({
       /** Crates to test, each as `-p <crate>`. Empty means the whole workspace. */
       packages: z.array(z.string().min(1)).default([]),
       test_args: z.array(z.string()).default([]),
+    })
+    .default({}),
+  /** node-test only: how to run the suite, where its tests live, and what coverage reports. */
+  node_test: z
+    .object({
+      command: z.array(z.string().min(1)).min(1).default(["node", "--import", "tsx", "--test"]),
+      test_glob: z.string().min(1).default("**/*.test.ts"),
+      /** Globs coverage is reported over. Default: the entry's `sources`. */
+      coverage_include: z.array(z.string().min(1)).min(1).optional(),
     })
     .default({}),
   /**
@@ -277,6 +286,7 @@ const defaultTemplates: Record<RunnerName, string> = {
   // the spec path is the source path. Repos that prefer integration tests set
   // spec_template: "tests/{base}.rs".
   cargo: "{dir}/{base}{ext}",
+  "node-test": "{dir}/{base}.test.ts",
 };
 
 export function specPathFromTemplate(template: string, relSource: string): string {
@@ -334,6 +344,7 @@ export function loadConfig(path: string): Config {
       pytest: { command: r.pytest.command, package: r.pytest.package, testGlob: r.pytest.test_glob },
       go: { command: r.go.command, packages: r.go.packages, race: r.go.race, buildTags: r.go.build_tags },
       cargo: { command: r.cargo.command, packages: r.cargo.packages, testArgs: r.cargo.test_args },
+      nodeTest: { command: r.node_test.command, testGlob: r.node_test.test_glob, coverageInclude: r.node_test.coverage_include },
       explore: r.explore
         ? {
             baseUrlEnv: r.explore.base_url_env,

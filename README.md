@@ -273,7 +273,7 @@ falls back to the pack of the same name bundled with covergen.
 |---|---|---|
 | `name` | yes | The name you pass to `--repo` |
 | `root` | yes | Path to the repo, resolved relative to covergen.yaml |
-| `runner` | yes | `rspec`, `vitest`, `bun`, `jest`, `pytest`, `go` or `cargo`. An entry with `sweep: false` may name a runner this build does not have: it loads with a one-line warning instead of failing the whole config |
+| `runner` | yes | `rspec`, `vitest`, `bun`, `jest`, `pytest`, `go`, `cargo` or `node-test`. An entry with `sweep: false` may name a runner this build does not have: it loads with a one-line warning instead of failing the whole config |
 | `cwd` | no, default `.` | Working directory inside `root`, for example `apps/web` in a monorepo |
 | `sources` | yes | Globs for source files eligible for generation |
 | `spec_template` | no | Where the spec for a source file lives. When set, it wins over an existing nearby spec. See below |
@@ -288,6 +288,7 @@ falls back to the pack of the same name bundled with covergen.
 | `pytest` | no | pytest only. `command` (default `["python","-m","pytest"]`), `package` (the `--cov` target, default derived from `sources`) and `test_glob` (default `tests/**/test_*.py`) |
 | `go` | no | go only. `command` (default `["go","test"]`), `packages` (default `["./..."]`), `race` (default `true`, applied to the gate runs only) and `build_tags` |
 | `cargo` | no | cargo only. `command` (default `["cargo","llvm-cov"]`), `packages` (crates to test, each passed as `-p <crate>`; default `[]`, the whole workspace) and `test_args`, extra arguments passed to the test harness after `--` |
+| `node_test` | no | node-test only. `command` (default `["node","--import","tsx","--test"]`, or `["tsx","--test"]`), `test_glob` (default `**/*.test.ts`) and `coverage_include` (globs coverage is reported over, default `sources`) |
 | `allow_no_mutants` | no, default `false` | Accept candidates the mutation spot-check found nothing applicable to mutate on, instead of rejecting them as `weak_assertions` |
 
 `validate` is a list of argv arrays, for example
@@ -471,6 +472,11 @@ Every runner must emit lcov. `preflight` tells you what is missing.
   package is not the static prefix of `sources`. Coverage cannot be narrowed to
   one file here, so a run always measures the whole package.
 
+- **node:test**: Node 22 or newer, `node_test.command` must answer `--version`,
+  and something must match `node_test.test_glob`. A deep preflight ends with a
+  real coverage run that selects no test. Node writes the lcov itself, so the
+  repo needs nothing beyond tsx. See "The node:test runner" below.
+
 Add `.covergen/` to your global gitignore. It holds per-repo state, the last run
 report, and scratch coverage output.
 
@@ -516,6 +522,25 @@ repos:
       race: true               # -race on the gate runs, not on the baseline
       build_tags: ["integration"]
 ```
+
+### The node:test runner
+
+For a TypeScript project on node:test via tsx. Node 22 has the lcov reporter
+built in, so a run is the repo's own command plus
+`--experimental-test-coverage --test-reporter=lcov --test-reporter-destination=<file>`,
+with a second reporter (`spec`, to stdout) so a failing test still reaches the
+repair loop. `--enable-source-maps` is always passed, which is what maps
+coverage back onto the `.ts` lines.
+
+- **Narrowing.** On Node 22.5.0 and newer, coverage is narrowed with
+  `--test-coverage-include` (the `coverage_include` globs, or the file under test
+  on a gate run) and `--test-coverage-exclude` (`test_glob` plus `exclude`). On an
+  older Node 22 the flags do not exist, so the lcov is filtered by the same
+  globs after the run, the way the bun runner narrows it.
+- **Paths are globs.** Node expands every test file argument as a glob, so a
+  path such as `app/[id]/route.test.ts` is passed as `app/[[]id]/route.test.ts`.
+- **No whole-project baseline.** Node reports only modules a test loaded, so a
+  source file with no test at all is missing from the map rather than at 0%.
 
 ### The Rust runner
 

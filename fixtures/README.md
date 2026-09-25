@@ -22,6 +22,7 @@ toolchain is not installed is skipped rather than failed.
 | `rspec-min` | rspec | `bundle install` inside the fixture (rspec, simplecov, simplecov-lcov) |
 | `pytest-min` | pytest | `pytest` and `pytest-cov` importable by the interpreter in its `pytest.command` |
 | `go-min` | go | `go` on PATH (1.22 or newer), which brings `gofmt` with it |
+| `node-test-min` | node-test | Node 22 or newer; `tsx` from this repo |
 | `audit-vitest` | vitest | `@vitest/coverage-v8` from this repo. Deliberately bad tests: one case of every shape `covergen audit` has a verdict for |
 | `audit-go` | go | `go` on PATH. One `TestXxx` that calls the code and asserts nothing |
 | `rust-min` | cargo | `cargo llvm-cov` on PATH, plus the LLVM tools: `rustup component add llvm-tools-preview`, or `LLVM_COV` and `LLVM_PROFDATA` pointing at the system binaries |

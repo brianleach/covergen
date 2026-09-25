@@ -1,0 +1,12 @@
+{
+  "name": "covergen-fixture-node-test-min",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

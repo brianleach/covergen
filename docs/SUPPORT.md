@@ -23,6 +23,7 @@ lcov before covergen is useful:
 | rspec | `simplecov` and `simplecov-lcov` in the bundle, plus the `spec_helper` opt-in that `covergen preflight` prints | the repo |
 | pytest | `pytest-cov`, which writes lcov natively. No opt-in in the repo's own test setup | the repo |
 | go | nothing; `go test -coverprofile` is built in and covergen converts the block profile itself | nobody |
+| node-test | `tsx`; Node 22 writes lcov with its built-in reporter | the repo |
 | cargo | `cargo-llvm-cov`, plus the LLVM tools it drives: the `llvm-tools-preview` rustup component, or `LLVM_COV` and `LLVM_PROFDATA` pointing at a system llvm | the machine, not the repo |
 
 `covergen preflight --repo <name>` answers this question in under a second and
@@ -38,6 +39,7 @@ is the first thing to run against any new repo.
 | rspec | Ruby | not exercised | `fixtures/rspec-min`, skipped on any machine without bundler and an installed bundle | unproven in this environment | needs the `spec_helper` opt-in; the snippet preflight prints uses SimpleCov's `rails` profile, which a plain Ruby library must adapt |
 | pytest | Python | not exercised | `fixtures/pytest-min`, skipped wherever the configured interpreter has no pytest-cov | works | coverage cannot be narrowed to one file, so a gate run measures the whole `--cov` package; no real repository tried yet |
 | go | Go | not exercised | `fixtures/go-min`, skipped wherever `go version` does not answer | works | coverage is statements-based, projected onto lines; tests are selected by package rather than by file, so a gate run measures the target's whole package; no real repository tried yet |
+| node-test | TypeScript on node:test via tsx | not exercised | `fixtures/node-test-min`, skipped on Node older than 22 | works | no whole-project baseline: Node reports only files a test loaded; coverage include flags need Node 22.5.0, older Node 22 filters the lcov instead |
 | cargo | Rust | workspaces, by `cargo metadata` | `fixtures/rust-min`, skipped wherever cargo-llvm-cov or the LLVM tools are absent | works | tests live in the source file, so the runner strips `#[cfg(test)]` lines out of the lcov to keep the gate honest; tests are selected by crate rather than by file; no real workspace tried yet |
 
 `fixtures/covergen.fixtures.yaml` is the config those fixtures run under. Each

@@ -68,7 +68,14 @@ const fixtures: Fixture[] = [
   // Rust compiles twice here (once for `cargo test --no-run`, once instrumented),
   // so this one gets a longer ceiling than the interpreted fixtures need.
   { repo: "rust-min", target: "src/rates.rs", uncoveredSymbol: "refund_fee", available: () => hasCargoLlvmCov(), timeoutMs: 600_000 },
+  // node:test via tsx. tsx is this checkout's devDependency, so only the Node version decides.
+  { repo: "node-test-min", target: "src/rates.ts", uncoveredSymbol: "refundFee", available: () => nodeAtLeast22() },
 ];
+
+/** True when this process runs on Node 22 or newer, the node-test runner's minimum. */
+function nodeAtLeast22(): boolean {
+  return Number(process.versions.node.split(".")[0]) >= 22;
+}
 
 /**
  * True when cargo-llvm-cov is installed and can reach llvm-cov and llvm-profdata.
@@ -240,6 +247,38 @@ describe("a bun spec that loads a second source file", () => {
     },
     120_000,
   );
+});
+
+/**
+ * The node-test deep preflight is a real coverage run that selects no test, and
+ * the gate narrows coverage to one file. Both on the real toolchain.
+ */
+describe("the node-test runner on node-test-min", () => {
+  const repo: RepoConfig = findRepo(config, "node-test-min");
+  const run = nodeAtLeast22() ? it : it.skip;
+
+  run("passes the deep preflight", async () => {
+    await expect(getRunner(repo.runner).preflight(repo, { deep: true })).resolves.toBeUndefined();
+  }, 120_000);
+
+  run("reports only the target file on a gate run, never the spec", async () => {
+    const target = "src/rates.ts";
+    const result = await getRunner(repo.runner).run(repo, {
+      files: ["src/rates.test.ts"],
+      coverage: true,
+      timeoutMs: config.gate.baseline_timeout_ms,
+      env: { COVERGEN_SOURCE: target },
+    });
+    expect(result.ok, `${result.stderr}\n${result.stdout}`).toBe(true);
+    expect(result.lcovPath, `no lcov:\n${result.stderr}\n${result.stdout}`).toBeTruthy();
+    try {
+      const map = await readLcov(result.lcovPath!, { cwd: repo.cwd });
+      expect([...map.keys()]).toEqual([target]);
+      expect(diffCoverage(new Map(), map, target).newlyCovered.length).toBeGreaterThan(0);
+    } finally {
+      await discardCoverageDir(result.lcovPath!);
+    }
+  }, 120_000);
 });
 
 /**
