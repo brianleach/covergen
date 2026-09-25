@@ -280,7 +280,7 @@ export const rules: Rule[] = [
   },
   {
     id: "no-os-specific",
-    runner: ["go", "vitest", "jest", "bun", "pytest"],
+    runner: ["go", "vitest", "jest", "bun", "pytest", "node-test"],
     status: "os_specific",
     description:
       "Never assume one operating system. Tests run on Linux and on macOS runners, so keep /proc and /sys paths, syscall constants, the Keychain and hardcoded path limits out of the test: use t.TempDir (or the runner's temp helper), and guard genuine platform behavior with a runtime.GOOS check that calls t.Skip.",

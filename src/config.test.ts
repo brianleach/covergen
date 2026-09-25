@@ -155,6 +155,41 @@ describe("cargo and mutation keys on a repo entry", () => {
   });
 });
 
+describe("node_test keys on a repo entry", () => {
+  test("defaults the command, test glob and spec path, and composes with language and the spec ceiling", () => {
+    const dir = mkdtempSync(join(tmpdir(), "covergen-"));
+    const path = join(dir, "covergen.yaml");
+    writeFileSync(
+      path,
+      [
+        "repos:",
+        "  - name: plain",
+        "    root: ../plain",
+        "    runner: node-test",
+        '    sources: ["src/**/*.ts"]',
+        "  - name: custom",
+        "    root: ../custom",
+        "    runner: node-test",
+        '    sources: ["lib/**/*.ts"]',
+        "    language: js",
+        "    pr_max_lines_per_file: 200",
+        "    node_test:",
+        '      command: ["tsx", "--test"]',
+        '      test_glob: "test/**/*.test.ts"',
+        '      coverage_include: ["lib/**/*.ts"]',
+        "",
+      ].join("\n"),
+    );
+    const [plain, custom] = loadConfig(path).repos;
+    expect(plain?.nodeTest).toEqual({ command: ["node", "--import", "tsx", "--test"], testGlob: "**/*.test.ts", coverageInclude: undefined });
+    expect(plain?.specPath("src/billing/rates.ts")).toBe("src/billing/rates.test.ts");
+    expect(getRunner(plain!.runner).name).toBe("node-test");
+    expect(custom?.nodeTest).toEqual({ command: ["tsx", "--test"], testGlob: "test/**/*.test.ts", coverageInclude: ["lib/**/*.ts"] });
+    expect(custom?.language).toBe("js");
+    expect(custom?.prMaxLinesPerFile).toBe(200);
+  });
+});
+
 describe("an unknown runner", () => {
   const write = (repos: string): string => {
     const dir = mkdtempSync(join(tmpdir(), "covergen-runner-"));
