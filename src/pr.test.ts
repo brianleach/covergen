@@ -1,9 +1,10 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertBranch, branchName, defaultBranch, dirtyPaths, openDraftPr, openDraftPrs, runCmd } from "./pr.js";
-import type { RepoConfig } from "./types.js";
+import { reverifyOnBase, type Reverify } from "./reverify.js";
+import type { RepoConfig, RunResult } from "./types.js";
 
 const originalPath = process.env.PATH;
 
@@ -338,5 +339,205 @@ describe("openDraftPr and a base that moved under it", () => {
     // once part two's URL exists. The note has to survive that rewrite.
     const bodies = await readFile(bodyLog, "utf8");
     expect(bodies.match(/Base moved by 1 commit during the run/g)).toHaveLength(3);
+  });
+});
+
+/**
+ * The accepted specs re-run on a default branch that moved during the run,
+ * against a real git remote. Whatever happens, the checkout has to end on the
+ * swept commit, on its branch, with the specs as the run left them.
+ */
+describe("openDraftPr re-verifying on a moved base", () => {
+  const passed: RunResult = { ok: true, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+
+  /** git for real, gh faked, keeping the title and body the PR was opened with. */
+  function watcher() {
+    const seen = { title: "", body: "" };
+    const exec = async (command: string, args: string[], cwd: string) => {
+      if (command !== "gh") return runCmd(command, args, cwd);
+      seen.title = args[args.indexOf("--title") + 1] ?? "";
+      seen.body = await readFile(args[args.indexOf("--body-file") + 1] as string, "utf8");
+      return { stdout: "https://github.com/example/repo/pull/7\n", stderr: "", exitCode: 0 };
+    };
+    return { exec, seen };
+  }
+
+  async function moveOrigin(tmp: string, file: string): Promise<string> {
+    const other = join(tmp, "other");
+    await git(tmp, "clone", "--quiet", join(tmp, "remote.git"), other);
+    await git(other, "config", "user.email", "someone@example.com");
+    await git(other, "config", "user.name", "someone");
+    await writeFile(join(other, file), "// someone else\n", "utf8");
+    await git(other, "add", "--", file);
+    await git(other, "commit", "-m", "someone else's merge");
+    await git(other, "push", "origin", "main");
+    return (await git(other, "rev-parse", "HEAD")).trim();
+  }
+
+  async function expectSwept(work: string, proved: string): Promise<void> {
+    expect((await git(work, "rev-parse", "HEAD")).trim()).toBe(proved);
+    expect((await git(work, "symbolic-ref", "HEAD")).trim()).toBe("refs/heads/main");
+  }
+
+  async function open(
+    work: string,
+    files: string[],
+    runSpec: (spec: string) => Promise<RunResult>,
+    maxCommits = 200,
+    pastDeadline = false,
+  ) {
+    const gh = watcher();
+    const results: Reverify[] = [];
+    const url = await openDraftPr({
+      repo: repoAt(work),
+      files,
+      title: "covergen: tests accepted in fixture",
+      body: "# body\n",
+      now: new Date(2026, 8, 9),
+      suffix: "rv",
+      baseSha: (await git(work, "rev-parse", "HEAD")).trim(),
+      exec: gh.exec,
+      reverify: { runSpec, maxCommits, pastDeadline: () => pastDeadline, results },
+    });
+    return { url, seen: gh.seen, results };
+  }
+
+  it("re-runs nothing when the base did not move", async () => {
+    const { work } = await fixture();
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const runSpec = vi.fn(async () => passed);
+
+    const { seen, results } = await open(work, ["src/a.test.ts"], runSpec);
+
+    expect(runSpec).not.toHaveBeenCalled();
+    expect(results).toEqual([]);
+    expect(seen.title).toBe("covergen: tests accepted in fixture");
+    expect(seen.body).not.toContain("re-verified");
+  });
+
+  it("runs each spec on the moved base and says so when all pass", async () => {
+    const { tmp, work } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    const moved = await moveOrigin(tmp, "src/theirs.ts");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const onBase: string[] = [];
+    const runSpec = vi.fn(async (spec: string) => {
+      onBase.push((await git(work, "rev-parse", "HEAD^")).trim(), await readFile(join(work, spec), "utf8"));
+      return passed;
+    });
+
+    const { seen, results } = await open(work, ["src/a.test.ts"], runSpec);
+
+    expect(onBase).toEqual([moved, "// generated\n"]);
+    expect(results).toEqual([{ base: moved, failed: [] }]);
+    expect(seen.title).toBe("covergen: tests accepted in fixture");
+    expect(seen.body).toContain("Base moved by 1 commit during the run");
+    expect(seen.body).toContain(`re-verified on ${moved.slice(0, 7)}`);
+    // The PR branch is still cut from the swept commit and holds the spec.
+    expect((await git(work, "rev-parse", "origin/covergen/20260909-rv^")).trim()).toBe(proved);
+    expect(await git(work, "show", "origin/covergen/20260909-rv:src/a.test.ts")).toBe("// generated\n");
+    await expectSwept(work, proved);
+  });
+
+  it("opens the PR as needs rebase and names the spec that failed on the moved base", async () => {
+    const { tmp, work } = await fixture();
+    const moved = await moveOrigin(tmp, "src/theirs.ts");
+    for (const name of ["a", "b"]) await writeFile(join(work, "src", `${name}.test.ts`), "// generated\n", "utf8");
+    const runSpec = async (spec: string): Promise<RunResult> =>
+      spec === "src/b.test.ts"
+        ? { ...passed, ok: false, exitCode: 1, stdout: " FAIL src/b.test.ts\nAssertionError: expected 1 to be 2\n" }
+        : passed;
+
+    const { url, seen, results } = await open(work, ["src/a.test.ts", "src/b.test.ts"], runSpec);
+
+    expect(url).toBe("https://github.com/example/repo/pull/7");
+    expect(seen.title).toBe("needs rebase: covergen: tests accepted in fixture");
+    expect(seen.body).toContain("- `src/b.test.ts`: FAIL src/b.test.ts");
+    expect(results).toEqual([{ base: moved, failed: [{ spec: "src/b.test.ts", line: "FAIL src/b.test.ts" }] }]);
+    // Both specs are still in the PR: a failure on the new base loses nothing.
+    const committed = await git(work, "show", "--name-only", "--format=", "origin/covergen/20260909-rv");
+    expect(committed.trim().split("\n").sort()).toEqual(["src/a.test.ts", "src/b.test.ts"]);
+  });
+
+  it("counts a spec whose change conflicts with the moved base as failed and still runs the rest", async () => {
+    const { tmp, work } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    await moveOrigin(tmp, "src/a.test.ts");
+    for (const name of ["a", "b"]) await writeFile(join(work, "src", `${name}.test.ts`), "// generated\n", "utf8");
+    const runSpec = vi.fn(async () => passed);
+
+    const { seen, results } = await open(work, ["src/a.test.ts", "src/b.test.ts"], runSpec);
+
+    expect(runSpec.mock.calls).toEqual([["src/b.test.ts"]]);
+    expect(results[0]?.failed).toEqual([{ spec: "src/a.test.ts", line: expect.stringContaining("rebase conflict") }]);
+    expect(seen.title.startsWith("needs rebase: ")).toBe(true);
+    await expectSwept(work, proved);
+  });
+
+  it("skips the re-run and says why when the base moved further than the cap", async () => {
+    const { tmp, work } = await fixture();
+    await moveOrigin(tmp, "src/theirs.ts");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const runSpec = vi.fn(async () => passed);
+
+    const { seen, results } = await open(work, ["src/a.test.ts"], runSpec, 0);
+
+    expect(runSpec).not.toHaveBeenCalled();
+    expect(results[0]?.skipped).toContain("over sweep.reverify_max_commits (0)");
+    expect(seen.body).toContain("Not re-verified on the moved base");
+    expect(seen.title).toBe("covergen: tests accepted in fixture");
+  });
+
+  it("skips the re-run when the run is past its wall-clock ceiling", async () => {
+    const { tmp, work } = await fixture();
+    await moveOrigin(tmp, "src/theirs.ts");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+    const runSpec = vi.fn(async () => passed);
+
+    const { results } = await open(work, ["src/a.test.ts"], runSpec, 200, true);
+
+    expect(runSpec).not.toHaveBeenCalled();
+    expect(results[0]?.skipped).toBe("the run is past its wall-clock ceiling");
+  });
+
+  it("still opens the PR, with a note, when the re-run throws", async () => {
+    const { tmp, work } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    await moveOrigin(tmp, "src/theirs.ts");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+
+    const { url, seen } = await open(work, ["src/a.test.ts"], async () => {
+      throw new Error("runner died");
+    });
+
+    expect(url).toBe("https://github.com/example/repo/pull/7");
+    expect(seen.body).toContain("the re-run stopped: runner died");
+    expect(await git(work, "show", "origin/covergen/20260909-rv:src/a.test.ts")).toBe("// generated\n");
+    await expectSwept(work, proved);
+  });
+
+  it("ends on the swept commit with the specs in the working tree when the re-run throws", async () => {
+    const { tmp, work } = await fixture();
+    const proved = (await git(work, "rev-parse", "HEAD")).trim();
+    await moveOrigin(tmp, "src/theirs.ts");
+    await git(work, "fetch", "origin");
+    await writeFile(join(work, "src", "a.test.ts"), "// generated\n", "utf8");
+
+    await expect(
+      reverifyOnBase({
+        root: work,
+        cwd: work,
+        files: ["src/a.test.ts"],
+        baseRef: "origin/main",
+        exec: runCmd,
+        runSpec: async () => {
+          throw new Error("runner died");
+        },
+      }),
+    ).rejects.toThrow("runner died");
+
+    await expectSwept(work, proved);
+    expect(await readFile(join(work, "src", "a.test.ts"), "utf8")).toBe("// generated\n");
+    expect(await dirtyPaths(work)).toEqual(["src/a.test.ts"]);
   });
 });

@@ -20,6 +20,8 @@ import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js"
 import type { Logger } from "./logger.js";
 import { orderTargetsByGap, orderTargetsByValue, RunFailed, runPipeline } from "./pipeline.js";
 import { dirtyPaths, openDraftPrs } from "./pr.js";
+import type { Reverify } from "./reverify.js";
+import { getRunner } from "./runners/index.js";
 import { movementLine } from "./scope.js";
 import type { RepoConfig, RunCoverage, RunSummary } from "./types.js";
 
@@ -116,6 +118,19 @@ export interface RepoReport {
    * repo never ran, and on a fast run, which has no repo-wide baseline.
    */
   coverage?: RunCoverage;
+  /**
+   * The accepted specs re-run on the default branch that moved during the run.
+   * `failed` lists the specs that no longer pass there, over every part PR.
+   */
+  reverify?: Reverify;
+}
+
+/** Every part PR's outcome as one report entry. */
+export function mergeReverify(results: Reverify[]): Reverify | undefined {
+  const first = results[0];
+  if (!first) return undefined;
+  const skipped = results.find((r) => r.skipped)?.skipped;
+  return { base: first.base, failed: results.flatMap((r) => r.failed), ...(skipped ? { skipped } : {}) };
 }
 
 export interface SweepReport {
@@ -305,6 +320,8 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         continue;
       }
 
+      const runner = getRunner(repo.runner);
+      const results: Reverify[] = [];
       const urls = await openPr({
         repo,
         files: [...new Set(summary.accepted.map((c) => c.specPath))],
@@ -312,9 +329,16 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
         body: prBody(summary),
         maxLines: prMaxLines,
         baseSha,
+        reverify: {
+          runSpec: (spec) =>
+            runner.run(repo, { files: [spec], coverage: false, timeoutMs: config.gate.timeout_ms, gate: true }),
+          maxCommits: config.sweep.reverify_max_commits,
+          pastDeadline: () => limits.deadlineAt !== undefined && Date.now() >= limits.deadlineAt,
+          results,
+        },
       });
       log.info({ repo: repo.name, urls, parts: urls.length }, urls.length === 1 ? "draft PR opened" : "draft PRs opened");
-      add({ ...base, status: "ran", prUrl: urls[0], prUrls: urls });
+      add({ ...base, status: "ran", prUrl: urls[0], prUrls: urls, reverify: mergeReverify(results) });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       log.error({ repo: repo.name, err: reason }, "repo failed, continuing with the next one");

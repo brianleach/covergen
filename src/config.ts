@@ -231,6 +231,11 @@ const ConfigSchema = z.object({
        * it and leaves the rest for the next run. 0 disables the ceiling.
        */
       pr_max_lines_per_file: z.number().int().min(0).default(500),
+      /**
+       * Commits the default branch may gain during a run before the accepted
+       * specs are no longer re-run on it at PR time.
+       */
+      reverify_max_commits: z.number().int().min(0).default(200),
     })
     .default({}),
   segments: z
