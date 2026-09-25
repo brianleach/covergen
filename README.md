@@ -260,6 +260,7 @@ falls back to the pack of the same name bundled with covergen.
 | `sweep.max_tokens_per_run` | `0` | Tokens one run may spend across every repo in it. `0` disables |
 | `sweep.max_minutes` | `300` | Wall-clock minutes before a run stops starting new work. `0` disables |
 | `sweep.pr_max_lines` | `600` | Lines of accepted spec one draft PR may hold. A larger run is split into part PRs. `0` opens one PR however large |
+| `sweep.reverify_max_commits` | `200` | Commits the default branch may gain during a run and still have the accepted specs re-run on it before the PR opens. More drift than this skips the re-run |
 | `sweep.pr_max_lines_per_file` | `500` | Lines one spec file may reach before the run stops adding segments to it and leaves the rest for the next run. `0` disables |
 | `segments.max_lines` | `50` | Largest uncovered chunk sent as one candidate (CoverUp's cap) |
 | `segments.max_per_file` | `8` | Most segments taken from one source file |
@@ -882,8 +883,28 @@ as it is; nothing is rebased. When the branch still cannot be cut from that
 commit, it is cut from HEAD instead and the body says that too, because a PR with
 a note on it beats proven tests left on disk.
 
-The report carries both per repo: `repos[].baseSha` is the commit the run was
-proved on, `repos[].baseRefresh` is what happened to the checkout before it.
+When the base moved, the accepted specs are also re-run on the newer commit
+before the PR opens. This happens in the run's own checkout, which already has
+its dependencies: the specs go into a temporary commit on a detached HEAD, that
+commit is rebased onto the default branch, each spec runs alone with the same
+per-spec command the gate uses, and the checkout goes back to the swept commit
+with the specs uncommitted again. The PR branch is still cut from the swept
+commit either way. There are three outcomes:
+
+- Every spec passes on the new base: the PR opens as usual, and the body adds
+  "All accepted specs re-verified on <sha>."
+- Some specs fail: the PR still opens, because every test in it passed on the
+  commit it is cut from. The title is prefixed "needs rebase:" and the body lists
+  each failing spec with the first assertion line of its failure. A spec whose
+  change conflicts with the new base during the rebase counts as failed.
+- The re-run is skipped: the base moved by more than `sweep.reverify_max_commits`
+  commits, or the run is past its `sweep.max_minutes` ceiling. The body says
+  which, and the PR opens as usual.
+
+The report carries these per repo: `repos[].baseSha` is the commit the run was
+proved on, `repos[].baseRefresh` is what happened to the checkout before it,
+and `repos[].reverify` is `{ base, failed: [{ spec, line }] }` for the re-run,
+with a `skipped` reason when there was none.
 
 ### Not generating for a file twice
 

@@ -169,6 +169,23 @@ describe("sweepAll", () => {
     expect(reportLines(report)).toContain(`${urls[0]}, ${urls[1]}`);
   });
 
+  it("records the re-verification of every part PR, and nothing when there was none", async () => {
+    const config = await workspace();
+    let parts = 0;
+    const openPr = vi.fn(async (a: Parameters<typeof openDraftPrs>[0]) => {
+      parts += 1;
+      if (parts === 1) {
+        a.reverify?.results.push({ base: "abc1234", failed: [] });
+        a.reverify?.results.push({ base: "abc1234", failed: [{ spec: "src/a0.test.ts", line: "expected 1" }] });
+      }
+      return ["https://example.test/pr/1"];
+    }) as unknown as typeof openDraftPrs;
+    const report = await sweepAll(args(config, { pr: true, openPr }));
+    expect(vi.mocked(openPr).mock.calls[0]?.[0].reverify).toMatchObject({ maxCommits: 200 });
+    expect(report.repos[0]?.reverify).toEqual({ base: "abc1234", failed: [{ spec: "src/a0.test.ts", line: "expected 1" }] });
+    expect(report.repos[1]?.reverify).toBeUndefined();
+  });
+
   it("refuses to touch a dirty checkout and never runs it", async () => {
     const config = await workspace();
     const a = args(config, { pr: true, dirty: vi.fn(async (root: string) => (root.endsWith("r1") ? ["src/a.ts"] : [])) });

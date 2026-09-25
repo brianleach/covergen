@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { countLines, packSpecFiles, partBody, partTitle, type SpecFile } from "./chunk.js";
 import type { GitExecResult } from "./git.js";
+import { reverifyNote, reverifyOnBase, type Reverify, type ReverifyOptions } from "./reverify.js";
 import type { RepoConfig } from "./types.js";
 
 export const BRANCH_PREFIX = "covergen/";
@@ -108,7 +109,12 @@ export interface OpenDraftPrArgs {
    * body afterwards has to be able to put them back.
    */
   notes?: string[];
+  /** Re-run the accepted specs on the default branch when it moved during the run. */
+  reverify?: ReverifyOptions;
 }
+
+/** Title prefix for a PR whose specs fail on the moved default branch. */
+export const NEEDS_REBASE = "needs rebase: ";
 
 /**
  * Commits the default branch has gained since `sha`. Best effort: a fetch or a
@@ -122,9 +128,31 @@ async function driftFrom(exec: CmdExec, root: string, sha: string, ref: string):
   return Number.isFinite(moved) && moved > 0 ? moved : 0;
 }
 
+/**
+ * One PR's re-verification, or why it was skipped. A re-run that could not
+ * finish is reported as skipped: the specs it holds were proven on the swept
+ * commit, and the PR opens either way.
+ */
+async function reverify(
+  opts: ReverifyOptions,
+  where: Omit<Parameters<typeof reverifyOnBase>[0], "runSpec">,
+  moved: number,
+): Promise<Reverify> {
+  const base = (await where.exec("git", ["rev-parse", where.baseRef], where.root)).stdout.trim();
+  const skip = (skipped: string): Reverify => ({ base, failed: [], skipped });
+  if (moved > opts.maxCommits) return skip(`the base moved ${moved} commits, over sweep.reverify_max_commits (${opts.maxCommits})`);
+  if (opts.pastDeadline()) return skip("the run is past its wall-clock ceiling");
+  try {
+    return await reverifyOnBase({ ...where, runSpec: opts.runSpec });
+  } catch (err) {
+    return skip(`the re-run stopped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /** Branch, commit, push and open the draft PR. Returns the PR URL `gh` printed. */
 export async function openDraftPr(args: OpenDraftPrArgs): Promise<string> {
-  const { repo, files, title, body } = args;
+  const { repo, files, body } = args;
+  let title = args.title;
   const exec = args.exec ?? runCmd;
   if (files.length === 0) throw new Error(`nothing to commit for ${repo.name}`);
   const root = repo.root;
@@ -139,7 +167,6 @@ export async function openDraftPr(args: OpenDraftPrArgs): Promise<string> {
   const bodyFile = join(scratch, "body.md");
 
   try {
-    await writeFile(messageFile, `${title}\n\n${body}`, "utf8");
     // The branch starts at the commit the tests were proven on. Notes are what
     // the reviewer needs to know about that commit, and they are collected
     // before the body is written because the checkout itself can add one.
@@ -153,8 +180,15 @@ export async function openDraftPr(args: OpenDraftPrArgs): Promise<string> {
             `${args.baseSha.slice(0, 7)}, the commit these tests were proven on, not from the current ${base.name}. ` +
             `It merges as it is; nothing here was rebased.`,
         );
+        if (args.reverify) {
+          const outcome = await reverify(args.reverify, { root, cwd: repo.cwd, files, baseRef: base.ref, exec }, moved);
+          args.reverify.results.push(outcome);
+          notes.push(reverifyNote(outcome));
+          if (outcome.failed.length > 0) title = `${NEEDS_REBASE}${title}`;
+        }
       }
     }
+    await writeFile(messageFile, `${title}\n\n${body}`, "utf8");
     const cut = await exec("git", ["checkout", "-b", branch, start], root);
     if (cut.exitCode !== 0) {
       // Never lose proven work to a checkout. Branching from HEAD keeps the
@@ -251,7 +285,17 @@ export async function openDraftPrs(args: OpenDraftPrsArgs): Promise<string[]> {
   const parts = packSpecFiles(sizes, args.maxLines);
   if (parts.length <= 1) {
     return [
-      await openDraftPr({ repo, files, title, body, exec, now: args.now, suffix: args.suffixes?.[0], baseSha: args.baseSha }),
+      await openDraftPr({
+        repo,
+        files,
+        title,
+        body,
+        exec,
+        now: args.now,
+        suffix: args.suffixes?.[0],
+        baseSha: args.baseSha,
+        reverify: args.reverify,
+      }),
     ];
   }
 
@@ -276,6 +320,7 @@ export async function openDraftPrs(args: OpenDraftPrsArgs): Promise<string[]> {
       suffix: args.suffixes?.[i],
       baseSha: args.baseSha,
       notes: notes[i],
+      reverify: args.reverify,
     });
   }
   for (let i = 0; i < parts.length - 1; i += 1) {
