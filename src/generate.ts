@@ -10,8 +10,9 @@
  * rejected by the Opus 5 / Sonnet 5 family, so there is nothing to tune here.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { normalizedHash } from "./normalized-hash.js";
 import type { Candidate, PromptBlocks, PromptMessage, Segment } from "./types.js";
 
 /**
@@ -56,8 +57,7 @@ export function shortId(): string {
 
 /** sha256 over the code with all whitespace collapsed, so reindenting is not a new candidate. */
 export function hashCode(code: string): string {
-  const normalized = code.replace(/\s+/g, " ").trim();
-  return createHash("sha256").update(normalized).digest("hex");
+  return normalizedHash(code);
 }
 
 const FENCE = /^[ \t]*```[^\n]*\n([\s\S]*?)\n?^[ \t]*```[ \t]*$/gm;

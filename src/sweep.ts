@@ -15,7 +15,7 @@ import { refreshBase } from "./base.js";
 import type { Config } from "./config.js";
 import { mutationScore, prBody, prTitle, specQuality, type MutationScore, type SpecQuality } from "./emit.js";
 import { changedFiles, listSources, matchesSources, toCwdRelative } from "./git.js";
-import { driftedSpecs, journalBody, journalTitle, type RunJournal } from "./journal.js";
+import { driftedSpecs, journalBody, journalTitle, unhashedSpecs, type RunJournal } from "./journal.js";
 import { ceilingHit, limitNote, totalTokens, type RunLimits } from "./limits.js";
 import type { Logger } from "./logger.js";
 import { orderTargetsByGap, orderTargetsByValue, RunFailed, runPipeline } from "./pipeline.js";
@@ -346,8 +346,17 @@ export async function sweepAll(args: SweepAllArgs): Promise<SweepReport> {
       // not pass together, or opening the PR did. The run landed nothing either
       // way, but the reasons are known and last-run.md already lists them, so
       // the row says them too rather than an empty map that reads as "no work".
+      // The spend is known for the same reason, and a row that says zero tokens
+      // would hide it from the row and from the sweep total both.
       const gated = ran ?? (err instanceof RunFailed ? err.summary : undefined);
-      add({ ...empty, rejected: gated ? countRejected(gated) : {}, status: "failed", reason });
+      add({
+        ...empty,
+        ...(gated
+          ? { targetsAttempted: gated.targets.length, tokens: totalTokens(gated.tokens), rejected: countRejected(gated) }
+          : {}),
+        status: "failed",
+        reason,
+      });
     }
   }
 
@@ -445,6 +454,16 @@ export async function openPrFromJournal(args: PrFromJournalArgs): Promise<string
     throw new Error(
       `refusing to open a PR from journal ${journal.id}: ${drift.join(", ")}. ` +
         "These tests were proven as the run left them, so put the files back or run covergen again.",
+    );
+  }
+  // Not fatal either: an older journal recorded no hash, so these files could
+  // only be checked for existence. Said out loud, because the PR still claims
+  // the gate passed them as they are now.
+  const unhashed = unhashedSpecs(journal);
+  if (unhashed.length > 0) {
+    log.warn(
+      { journal: journal.id, specs: unhashed },
+      `this journal recorded no hash for ${unhashed.join(", ")}, so only their existence was checked, not that they are the files the run proved`,
     );
   }
   const files = [...new Set(journal.accepted.map((entry) => entry.spec))];
