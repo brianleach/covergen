@@ -301,6 +301,21 @@ describe("sweepAll", () => {
     const report = await sweepAll(args(config, { runOne: failing as unknown as SweepAllArgs["runOne"] }));
     expect(report.repos[0]).toMatchObject({ status: "failed", accepted: 0, rejected: REASONS });
   });
+
+  it("reports the spend of a repo whose run gated its candidates and then failed", async () => {
+    const config = await workspace();
+    const gated = { ...rejectionSummary(), targets: ["src/a.ts", "src/b.ts"] };
+    const failing = vi.fn(async () => {
+      throw new RunFailed("combined accepted specs failed on run 1 of 3", gated);
+    });
+    const report = await sweepAll(args(config, { runOne: failing as unknown as SweepAllArgs["runOne"] }));
+    // Two repos swept (r3 is sweep: false), both failing after 1,500 tokens each.
+    expect(report.repos[0]).toMatchObject({ status: "failed", targetsAttempted: 2, tokens: 1500 });
+    expect(report.tokens).toBe(3000);
+    expect(reportLines(report)).toContain(
+      "failed  r1: 0/2 accepted, 1,500 tokens, combined accepted specs failed on run 1 of 3",
+    );
+  });
 });
 
   it("ranks before capping, keeps only changed source files, and rejects an unknown order", async () => {
@@ -460,5 +475,26 @@ describe("openPrFromJournal", () => {
       openPrFromJournal({ config, repo, journal, log, openPr: (a) => openDraftPrs({ ...a, exec: fakeExec(calls) }) }),
     ).rejects.toThrow(/src\/b\.test\.ts has changed since the run wrote it/);
     expect(calls).toEqual([]);
+  });
+
+  it("names the specs an older journal recorded no hash for, and still opens the PR", async () => {
+    const { config, repo, journal, calls } = await killedRun();
+    const older = { ...journal, accepted: journal.accepted.map((e) => (e.spec === SPECS[1] ? { ...e, specHash: undefined } : e)) };
+    const warn = vi.fn();
+    const spyLog = { ...log, warn, info: vi.fn() } as unknown as typeof log;
+
+    const urls = await openPrFromJournal({
+      config,
+      repo,
+      journal: older,
+      log: spyLog,
+      openPr: (a) => openDraftPrs({ ...a, exec: fakeExec(calls) }),
+    });
+
+    expect(urls).toEqual(["https://github.com/example/repo/pull/7"]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [fields, message] = warn.mock.calls[0] as [{ specs: string[] }, string];
+    expect(fields.specs).toEqual(["src/b.test.ts"]);
+    expect(message).toMatch(/no hash for src\/b\.test\.ts, so only their existence was checked/);
   });
 });

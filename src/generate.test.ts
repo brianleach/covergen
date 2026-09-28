@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -8,7 +11,16 @@ import {
   hashCode,
   shortId,
 } from "./generate.js";
+import { specFileHash } from "./journal.js";
+import { normalizedHash } from "./normalized-hash.js";
 import type { Candidate, PromptBlocks, Segment } from "./types.js";
+
+// Passthrough spy: the real hash, with every call recorded, so a test can tell
+// that a call site went through the shared helper rather than a copy of it.
+vi.mock("./normalized-hash.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./normalized-hash.js")>();
+  return { normalizedHash: vi.fn(real.normalizedHash) };
+});
 
 const blocks: PromptBlocks = {
   stable: "STABLE idiom pack and rules",
@@ -97,6 +109,22 @@ describe("hashCode", () => {
 
   it("returns a sha256 hex digest", () => {
     expect(hashCode("x")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("hashes a candidate and a spec file on disk through the one shared helper", async () => {
+    const code = 'it("adds", () => {\n  expect(add(1, 2)).toBe(3);\n});\n';
+    const dir = await mkdtemp(join(tmpdir(), "covergen-hash-test-"));
+    await writeFile(join(dir, "a.test.ts"), code, "utf8");
+    const helper = vi.mocked(normalizedHash);
+    helper.mockClear();
+
+    const candidate = hashCode(code);
+    const file = await specFileHash(dir, "a.test.ts");
+
+    expect(file).toBe(candidate);
+    // Both call sites delegated: a local copy of the normalization in either
+    // would still hash the same today and drift apart later.
+    expect(helper.mock.calls).toEqual([[code], [code]]);
   });
 });
 

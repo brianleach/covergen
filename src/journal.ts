@@ -8,9 +8,9 @@
  * later command, or a person, needs to finish what the run started.
  */
 
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { normalizedHash } from "./normalized-hash.js";
 import { writeJsonAtomic } from "./state.js";
 
 export const JOURNAL_VERSION = 1;
@@ -131,13 +131,12 @@ export async function readJournal(path: string): Promise<RunJournal> {
 /**
  * The spec file as it sits in the checkout. Missing reads as undefined, never as
  * empty. Whitespace is collapsed first, the same normalization `hashCode` gives
- * a candidate, so a reformatted file is not reported as a changed one. Hashed
- * here rather than through generate.ts, which journal reading has no other
- * reason to load.
+ * a candidate, through the same helper, so a reformatted file is not reported
+ * as a changed one.
  */
 export async function specFileHash(cwd: string, spec: string): Promise<string | undefined> {
   const text = await readFile(join(cwd, spec), "utf8").catch(() => undefined);
-  return text === undefined ? undefined : createHash("sha256").update(text.replace(/\s+/g, " ").trim()).digest("hex");
+  return text === undefined ? undefined : normalizedHash(text);
 }
 
 /**
@@ -155,6 +154,17 @@ export async function driftedSpecs(cwd: string, journal: RunJournal): Promise<st
     else if (entry.specHash && now !== entry.specHash) out.push(`${spec} has changed since the run wrote it`);
   }
   return out;
+}
+
+/**
+ * Specs whose latest journal entry carries no specHash, so the only thing that
+ * can be checked about them is that the file still exists. Journals written
+ * before the field existed have these.
+ */
+export function unhashedSpecs(journal: RunJournal): string[] {
+  const latest = new Map<string, JournalEntry>();
+  for (const entry of journal.accepted) latest.set(entry.spec, entry);
+  return [...latest].filter(([, entry]) => !entry.specHash).map(([spec]) => spec);
 }
 
 export function journalTitle(journal: RunJournal): string {
