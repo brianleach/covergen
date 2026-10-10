@@ -1,0 +1,56 @@
+{
+  "tokenizer": "cl100k_base (js-tiktoken)",
+  "rows": 1476,
+  "candidate_pairs": 1491,
+  "duplicates_dropped": 1,
+  "size_ceiling_tokens": 23808,
+  "size_ceiling_rule": "p99 of source_plus_test tokens after dedupe, rounded up to a multiple of 256",
+  "over_ceiling_dropped": 14,
+  "distribution_before_ceiling": {
+    "source": {
+      "p50": 598,
+      "p90": 3698,
+      "p99": 14794,
+      "max": 30956
+    },
+    "test": {
+      "p50": 829,
+      "p90": 4348,
+      "p99": 15278,
+      "max": 43567
+    },
+    "source_plus_test": {
+      "p50": 1759,
+      "p90": 7623,
+      "p99": 23791,
+      "max": 63527
+    }
+  },
+  "pairs_per_repo": {
+    "vitest-dev/vitest": 33,
+    "vitejs/vite": 66,
+    "vuejs/core": 151,
+    "vueuse/vueuse": 215,
+    "unjs/ofetch": 1,
+    "unjs/defu": 2,
+    "unjs/ufo": 13,
+    "unjs/h3": 64,
+    "unjs/pathe": 3,
+    "unjs/unstorage": 39,
+    "unjs/hookable": 4,
+    "unjs/scule": 1,
+    "unjs/destr": 1,
+    "unjs/c12": 6,
+    "unjs/unimport": 27,
+    "colinhacks/zod": 57,
+    "TanStack/query": 79,
+    "honojs/hono": 120,
+    "trpc/trpc": 41,
+    "remeda/remeda": 172,
+    "fabian-hiller/valibot": 287,
+    "mswjs/msw": 57,
+    "drizzle-team/drizzle-orm": 37
+  },
+  "seeds_run": 23,
+  "seeds_total": 23
+}

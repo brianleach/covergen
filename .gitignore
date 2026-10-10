@@ -12,3 +12,5 @@ __pycache__/
 .coverage
 fixtures/rust-min/target/
 fixtures/rust-min/Cargo.lock
+# Training corpus output (scripts/corpus/build.ts --out).
+/corpus-out/
