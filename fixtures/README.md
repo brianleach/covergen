@@ -25,6 +25,7 @@ toolchain is not installed is skipped rather than failed.
 | `node-test-min` | node-test | Node 22 or newer; `tsx` from this repo |
 | `audit-vitest` | vitest | `@vitest/coverage-v8` from this repo. Deliberately bad tests: one case of every shape `covergen audit` has a verdict for |
 | `audit-go` | go | `go` on PATH. One `TestXxx` that calls the code and asserts nothing |
+| `corpus/mini-repo` | none | Not a runner fixture: input for the corpus builder's pairing tests in `scripts/corpus/corpus.test.ts`, never executed |
 | `rust-min` | cargo | `cargo llvm-cov` on PATH, plus the LLVM tools: `rustup component add llvm-tools-preview`, or `LLVM_COV` and `LLVM_PROFDATA` pointing at the system binaries |
 
 Run one by hand:

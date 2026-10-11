@@ -1,0 +1,94 @@
+# Corpus seeds. commit and license_url are pinned by build.ts on first run.
+seeds:
+  - repo: vitest-dev/vitest
+    license: MIT
+    commit: 5c95521730bbc58ab20052f7ff807c29a8fbeb65
+    license_url: https://github.com/vitest-dev/vitest/blob/5c95521730bbc58ab20052f7ff807c29a8fbeb65/LICENSE
+  - repo: vitejs/vite
+    license: MIT
+    commit: 3b72997d42e7dd2b31898d0e68461e3025e836b6
+    license_url: https://github.com/vitejs/vite/blob/3b72997d42e7dd2b31898d0e68461e3025e836b6/LICENSE
+  - repo: vuejs/core
+    license: MIT
+    commit: 4ab865a848a1da3d10fb674f857e5fff13094644
+    license_url: https://github.com/vuejs/core/blob/4ab865a848a1da3d10fb674f857e5fff13094644/LICENSE
+  - repo: vueuse/vueuse
+    license: MIT
+    commit: ad2822b3854347f9eeb1c738fd2b90b773381c4a
+    license_url: https://github.com/vueuse/vueuse/blob/ad2822b3854347f9eeb1c738fd2b90b773381c4a/LICENSE
+  - repo: unjs/ofetch
+    license: MIT
+    commit: 1dbc37fd1ceab832fc7c90cad81b1091c95ba563
+    license_url: https://github.com/unjs/ofetch/blob/1dbc37fd1ceab832fc7c90cad81b1091c95ba563/LICENSE
+  - repo: unjs/defu
+    license: MIT
+    commit: 82632b66f5914e9946edce300e10633a3d5c0cb7
+    license_url: https://github.com/unjs/defu/blob/82632b66f5914e9946edce300e10633a3d5c0cb7/LICENSE
+  - repo: unjs/ufo
+    license: MIT
+    commit: f06c800d0c59f2a4a1b9ba65eb6cb61a84419be6
+    license_url: https://github.com/unjs/ufo/blob/f06c800d0c59f2a4a1b9ba65eb6cb61a84419be6/LICENSE
+  - repo: unjs/h3
+    license: MIT
+    commit: 66cfb8a357b6285451bad498c2c40002601fae98
+    license_url: https://github.com/unjs/h3/blob/66cfb8a357b6285451bad498c2c40002601fae98/LICENSE
+  - repo: unjs/pathe
+    license: MIT
+    commit: bc7477a01f0bd60ada017add8142c9f9d69ccdc5
+    license_url: https://github.com/unjs/pathe/blob/bc7477a01f0bd60ada017add8142c9f9d69ccdc5/LICENSE
+  - repo: unjs/unstorage
+    license: MIT
+    commit: aba7648bc6313b776310b05af7b2cd4db87ae463
+    license_url: https://github.com/unjs/unstorage/blob/aba7648bc6313b776310b05af7b2cd4db87ae463/LICENSE
+  - repo: unjs/hookable
+    license: MIT
+    commit: 6815e4fed0411f3e2f91a31bdb107d8aeac0a266
+    license_url: https://github.com/unjs/hookable/blob/6815e4fed0411f3e2f91a31bdb107d8aeac0a266/LICENSE.md
+  - repo: unjs/scule
+    license: MIT
+    commit: 5bc68048caad7c0e7de35842c83a510e8e1a7c4f
+    license_url: https://github.com/unjs/scule/blob/5bc68048caad7c0e7de35842c83a510e8e1a7c4f/LICENSE
+  - repo: unjs/destr
+    license: MIT
+    commit: 541b6f9aeada9fc30de9c5a7e086dbfc1c6fcdc7
+    license_url: https://github.com/unjs/destr/blob/541b6f9aeada9fc30de9c5a7e086dbfc1c6fcdc7/LICENSE
+  - repo: unjs/c12
+    license: MIT
+    commit: 9f8e54ccb1d959bf8a41aeadba955ab97b797cda
+    license_url: https://github.com/unjs/c12/blob/9f8e54ccb1d959bf8a41aeadba955ab97b797cda/LICENSE
+  - repo: unjs/unimport
+    license: MIT
+    commit: bbd07768ddb4919205bcb5a3cbc06c3a2791981a
+    license_url: https://github.com/unjs/unimport/blob/bbd07768ddb4919205bcb5a3cbc06c3a2791981a/LICENSE
+  - repo: colinhacks/zod
+    license: MIT
+    commit: 284243fb0d6532665afdc9239188773bb624f73c
+    license_url: https://github.com/colinhacks/zod/blob/284243fb0d6532665afdc9239188773bb624f73c/LICENSE
+  - repo: TanStack/query
+    license: MIT
+    commit: e3ef1387054c88bed7cb031e0f1e26bf7c99bddc
+    license_url: https://github.com/TanStack/query/blob/e3ef1387054c88bed7cb031e0f1e26bf7c99bddc/LICENSE
+  - repo: honojs/hono
+    license: MIT
+    commit: f78a245abc393368583085e19c7f5b28b460bf51
+    license_url: https://github.com/honojs/hono/blob/f78a245abc393368583085e19c7f5b28b460bf51/LICENSE
+  - repo: trpc/trpc
+    license: MIT
+    commit: 796700d8653b3832409fff997e6f5789519b9ea7
+    license_url: https://github.com/trpc/trpc/blob/796700d8653b3832409fff997e6f5789519b9ea7/LICENSE
+  - repo: remeda/remeda
+    license: MIT
+    commit: 8e6e78f6eaf66eaf0b4797d72cc3691823c91335
+    license_url: https://github.com/remeda/remeda/blob/8e6e78f6eaf66eaf0b4797d72cc3691823c91335/LICENSE
+  - repo: fabian-hiller/valibot
+    license: MIT
+    commit: 2d29dbf04d272341a1e617070bd0b03eda8c4404
+    license_url: https://github.com/fabian-hiller/valibot/blob/2d29dbf04d272341a1e617070bd0b03eda8c4404/LICENSE.md
+  - repo: mswjs/msw
+    license: MIT
+    commit: 3560a94e00ae2054ce0ea3aaad9fc6fb3892b6bf
+    license_url: https://github.com/mswjs/msw/blob/3560a94e00ae2054ce0ea3aaad9fc6fb3892b6bf/LICENSE.md
+  - repo: drizzle-team/drizzle-orm
+    license: Apache-2.0
+    commit: eab8bedbb65d5429c54e612ddbd88aa23091d398
+    license_url: https://github.com/drizzle-team/drizzle-orm/blob/eab8bedbb65d5429c54e612ddbd88aa23091d398/LICENSE
