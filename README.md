@@ -86,6 +86,7 @@ covergen baseline  --repo <name> [--top <n>] [--scope <sources|all>]
 covergen audit     --repo <name> [--limit <n>] [--report <path>] [--deep] [--pr]
                    [--min-savings-ms <n>]
 covergen pr        --from <journal> [--pr-max-lines <n>]
+covergen compare   --repo <name> --file <rel...> [--generators <list>] [--seed <n>] [--out <path>] [--fast]
 ```
 
 `run` generates tests for the source files you name.
@@ -450,8 +451,20 @@ openai_compatible:
   seed: 7
 ```
 
-A local model is judged against the Claude path by the comparison eval, which
-comes in a follow-up change.
+`covergen compare` is how a local model is judged against the Claude path. It
+runs the same files, in the same order, through the normal pipeline once per
+backend named in `--generators` (default `claude-code,openai-compatible`), every
+run a dry run that leaves `state.json` alone. The target's `git status` is read
+before the first run and after each one, the state directory excepted, and the
+eval stops if a run left the tree different. The report, written to
+`<state dir>/compare.md` unless `--out` says otherwise, lists per backend the
+candidates generated, built, passed and accepted, the acceptance rate (accepted
+over generated), newly covered lines per candidate, wall time and API cost.
+
+The win criterion, fixed before any local model is trained and printed at the
+top of every report:
+
+> The local model wins if its acceptance rate is within 5 percentage points of the Claude path's on the same targets, or better, at zero API cost. A miss is recorded with a diagnosis (data mix, context window, base model), not treated as a stop.
 
 ### Where the key lives
 
