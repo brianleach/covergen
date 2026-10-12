@@ -239,11 +239,17 @@ falls back to the pack of the same name bundled with covergen.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `generator` | `claude-code` | `claude-code` spends a Claude subscription, `api` the metered key. See below |
+| `generator` | `claude-code` | `claude-code` spends a Claude subscription, `api` the metered key, `openai-compatible` a local model. See below |
 | `claude_code.binary` | `claude` | Claude Code binary for the `claude-code` generator |
 | `claude_code.concurrency` | `1` | In-flight candidates on the subscription backend |
 | `claude_code.max_tokens_per_sweep` | `2000000` | Tokens a subscription run may spend before it stops calling. `0` disables |
 | `claude_code.timeout_ms` | `600000` | Ceiling on one headless turn |
+| `openai_compatible.base_url` | none | Endpoint root with its version prefix, e.g. `http://localhost:11434/v1`. Required when any repo uses `openai-compatible` |
+| `openai_compatible.model` | none | Model name the server knows. Required with `base_url` |
+| `openai_compatible.timeout_ms` | `600000` | Ceiling on one chat request |
+| `openai_compatible.max_tokens` | `16384` | Per-reply cap. A truncated reply is a loud error |
+| `openai_compatible.concurrency` | `1` | In-flight candidates against the local server |
+| `openai_compatible.seed` | none | Sent with every request, so a server that honors it samples repeatably |
 | `anthropic.api_key_env` | `ANTHROPIC_API_KEY` | Name of the variable holding the key |
 | `anthropic.generator_model` | `claude-opus-5` | Model that writes candidates |
 | `anthropic.repair_model` | `claude-sonnet-5` | Model that runs the repair rounds |
@@ -425,6 +431,27 @@ it. It also runs with `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` and
 `ANTHROPIC_API_KEY` stripped from its environment, so it works from inside an
 agent session and never quietly falls back to API billing. Resuming a session by
 id needs Claude Code 2.1.223 or newer.
+
+### Local model
+
+`generator: openai-compatible` sends the same prompt the Claude backends get to a
+model on an OpenAI-compatible chat endpoint, Ollama's `/v1/chat/completions`
+being the one it is built against. It uses plain `fetch` and no client library,
+reads replies through the same code-block extraction, and has no API bill, so a
+run reports `$0.00`. Preflight reads `<base_url>/models` and stops if the server
+is down or does not list the configured model. There is no prompt cache on this
+path and repairs run on the same model.
+
+```yaml
+generator: openai-compatible   # or per repo, or COVERGEN_GENERATOR=openai-compatible
+openai_compatible:
+  base_url: http://localhost:11434/v1
+  model: your-local-model
+  seed: 7
+```
+
+A local model is judged against the Claude path by the comparison eval, which
+comes in a follow-up change.
 
 ### Where the key lives
 

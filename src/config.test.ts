@@ -301,4 +301,26 @@ describe("generatorBackend", () => {
     expect(generatorBackend(cfg, findRepo(cfg, "web"), { COVERGEN_GENERATOR: "api" })).toBe("api");
     expect(() => generatorBackend(cfg, undefined, { COVERGEN_GENERATOR: "subscription" })).toThrow(/Unknown COVERGEN_GENERATOR/);
   });
+
+  test("the openai_compatible block is inert by default and the local kind is opt-in", () => {
+    const cfg = loadConfig(write(base));
+    expect(cfg.openai_compatible).toEqual({ timeout_ms: 600_000, max_tokens: 16384, concurrency: 1 });
+    const local = loadConfig(
+      write(`generator: openai-compatible\nopenai_compatible:\n  base_url: http://localhost:11434/v1\n  model: local-coder\n  seed: 7\n${base}`),
+    );
+    expect(generatorBackend(local, findRepo(local, "be"), {})).toBe("openai-compatible");
+    expect(local.openai_compatible).toMatchObject({ base_url: "http://localhost:11434/v1", model: "local-coder", seed: 7 });
+  });
+
+  test("an unknown generator kind is rejected", () => {
+    expect(() => loadConfig(write(`generator: ollama\n${base}`))).toThrow(/generator/);
+  });
+
+  test("the local kind without base_url or model is rejected, top level or per repo", () => {
+    expect(() => loadConfig(write(`generator: openai-compatible\nopenai_compatible:\n  model: m\n${base}`))).toThrow(
+      /openai_compatible.base_url/,
+    );
+    const perRepo = base.replace("generator: claude-code", "generator: openai-compatible");
+    expect(() => loadConfig(write(`openai_compatible:\n  base_url: http://h/v1\n${perRepo}`))).toThrow(/openai_compatible.model/);
+  });
 });
