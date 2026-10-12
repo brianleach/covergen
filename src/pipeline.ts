@@ -24,7 +24,7 @@ import { countLines, specFileFull } from "./chunk.js";
 import { claudeExec, createClaudeCodeGenerator, preflightClaudeCode } from "./claude-code.js";
 import { runCost } from "./cost.js";
 import { applyAccepted, prBody } from "./emit.js";
-import { createGenerator, dedupeCandidates } from "./generate.js";
+import { createGenerator, dedupeCandidates, type Generator } from "./generate.js";
 import { createOpenAICompatibleGenerator, preflightOpenAICompatible } from "./openai-compatible.js";
 import { evaluate, tailOf } from "./gate.js";
 import { discardCoverageDir, mergeCoverage, readLcov } from "./lcov.js";
@@ -44,6 +44,7 @@ import type {
   Candidate,
   CoverageMap,
   GateResult,
+  GeneratorBackend,
   RepoConfig,
   RunResult,
   RunSummary,
@@ -94,6 +95,15 @@ export interface PipelineArgs {
    * tests, which must never install a real handler.
    */
   abort?: AbortWatch;
+  /** Backend for this run, over the config and COVERGEN_GENERATOR. Set by `compare`. */
+  backend?: GeneratorBackend;
+  /** Wraps the generator once it is built, so `compare` can count calls and failures. */
+  wrapGenerator?: (generator: Generator) => Generator;
+  /**
+   * false leaves state.json as the run found it, so one `compare` run's frozen
+   * hashes cannot skip the next generator's candidates. Default true.
+   */
+  saveState?: boolean;
 }
 
 const emptyTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -546,7 +556,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
 
   const idiomPack = await loadIdiomPack(repo.idiomPackPath);
   const rules = rulesText(repo.runner, repo.disableRules);
-  const backend = generatorBackend(config, repo);
+  const backend = args.backend ?? generatorBackend(config, repo);
   const subscription = backend === "claude-code";
   const local = backend === "openai-compatible";
   // Optional at the type level for configs built by hand, as the tests do.
@@ -571,7 +581,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
     );
     log.info({ repo: repo.name, auth: who }, "generator claude-code, billed to the subscription");
   }
-  const generator = local
+  const built = local
     ? createOpenAICompatibleGenerator(localOpts)
     : subscription
     ? createClaudeCodeGenerator({
@@ -585,6 +595,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
         maxTokens: config.anthropic.max_tokens,
         apiKey: args.apiKey,
       });
+  const generator = args.wrapGenerator ? args.wrapGenerator(built) : built;
   // Repair rounds continue the same chat but may run on a cheaper model. Not on
   // the subscription backend: a repair resumes the generating session and only
   // that instance holds the session id, so one instance does both.
@@ -980,7 +991,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
       frozen: freezableHashes(candidates),
       dryRun,
     });
-    await saveState(repo, nextState, config.state_dir);
+    if (args.saveState ?? true) await saveState(repo, nextState, config.state_dir);
     keepSpecChanges = !dryRun;
 
     // The report is written on an aborted run too: saying what was accepted is

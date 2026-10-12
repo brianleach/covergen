@@ -9,13 +9,15 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parseEnv } from "node:util";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { EXIT_ABORTED } from "./abort.js";
 import { auditMarkdown, runAudit, writeAudit, writeAuditJson } from "./audit.js";
 import { claudeExec, preflightClaudeCode } from "./claude-code.js";
-import { findRepo, generatorBackend, loadConfig, type Config } from "./config.js";
+import { compareReport, gitTreeState, runComparison } from "./compare.js";
+import { findRepo, generatorBackend, loadConfig, stateDirFor, type Config } from "./config.js";
 import { buildFlows, crawl, exploreEnv, renderReport } from "./explore.js";
 import { openBrowserReader } from "./explore-browser.js";
 import { indexSpecs, loadSpecs } from "./explore-specs.js";
@@ -31,7 +33,7 @@ import { parseScope, scopeCoverage, scopesDiffer } from "./scope.js";
 import { openPrFromJournal, reportLines, runFields, sweepAll, sweepTargets, writeReport } from "./sweep.js";
 import { getRunner } from "./runners/index.js";
 import { rankByValue, valueTable } from "./value.js";
-import type { CoverageMap, CoverageScope, CoverageSummary, RepoConfig, RunSummary, ScopedCoverage } from "./types.js";
+import type { CoverageMap, CoverageScope, CoverageSummary, GeneratorBackend, RepoConfig, RunSummary, ScopedCoverage } from "./types.js";
 
 export const EXIT_OK = 0;
 export const EXIT_ERROR = 1;
@@ -391,6 +393,57 @@ export function buildProgram(): Command {
         prMaxLines: parseCeiling(opts.prMaxLines, "--pr-max-lines", config.sweep.pr_max_lines),
       });
       process.stdout.write(`${urls.join("\n")}\n`);
+      process.exitCode = EXIT_OK;
+    });
+
+  program
+    .command("compare")
+    .description("Run the same files once per generator backend, as dry runs, and report them side by side")
+    .requiredOption("--repo <name>", "repo name from covergen.yaml")
+    .requiredOption("--file <rel...>", "source file(s), relative to the repo cwd, in the order every run takes them")
+    .option("--generators <list>", "comma-separated backends, run in this order", "claude-code,openai-compatible")
+    .option("--seed <n>", "seed for the openai-compatible backend, over openai_compatible.seed")
+    .option("--out <path>", "where to write the markdown report. Default <state dir>/compare.md in the target")
+    .option("--fast", "baseline only the target's existing spec instead of the whole suite", false)
+    .action(async (opts: { repo: string; file: string[]; generators: string; seed?: string; out?: string; fast: boolean }) => {
+      const { config, log, apiKey } = context(program);
+      const repo = findRepo(config, opts.repo);
+      const known: GeneratorBackend[] = ["api", "claude-code", "openai-compatible"];
+      const generators = opts.generators.split(",").map((g) => g.trim()).filter(Boolean);
+      const bad = generators.filter((g) => !(known as string[]).includes(g));
+      if (generators.length === 0 || bad.length > 0) {
+        throw new Error(`--generators takes ${known.join(", ")}; got ${opts.generators}`);
+      }
+      // Before any run, so a missing endpoint does not surface after an hour on the Claude path.
+      if (generators.includes("openai-compatible") && !(config.openai_compatible.base_url && config.openai_compatible.model)) {
+        throw new Error("compare with openai-compatible needs openai_compatible.base_url and openai_compatible.model in covergen.yaml");
+      }
+      const seed = opts.seed === undefined ? config.openai_compatible.seed : Number.parseInt(opts.seed, 10);
+      if (seed !== undefined && !Number.isInteger(seed)) throw new Error(`--seed must be an integer, got ${opts.seed}`);
+      const runConfig = { ...config, openai_compatible: { ...config.openai_compatible, seed } };
+      const stateDir = stateDirFor(config, repo);
+      const rows = await runComparison({
+        generators: generators as GeneratorBackend[],
+        treeState: () => gitTreeState(repo.root, relative(repo.root, stateDir) || "."),
+        runOne: (backend, wrapGenerator) =>
+          runPipeline({
+            config: runConfig,
+            repo,
+            targets: opts.file,
+            dryRun: true,
+            fast: opts.fast,
+            log,
+            apiKey,
+            backend,
+            wrapGenerator,
+            saveState: false,
+          }),
+      });
+      const report = compareReport({ repo: repo.name, targets: opts.file, seed }, rows);
+      const out = resolve(opts.out ?? join(stateDir, "compare.md"));
+      await mkdir(dirname(out), { recursive: true });
+      await writeFile(out, report, "utf8");
+      process.stdout.write(`${report}\nReport written to ${out}\n`);
       process.exitCode = EXIT_OK;
     });
 
