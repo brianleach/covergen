@@ -25,6 +25,7 @@ import { claudeExec, createClaudeCodeGenerator, preflightClaudeCode } from "./cl
 import { runCost } from "./cost.js";
 import { applyAccepted, prBody } from "./emit.js";
 import { createGenerator, dedupeCandidates } from "./generate.js";
+import { createOpenAICompatibleGenerator, preflightOpenAICompatible } from "./openai-compatible.js";
 import { evaluate, tailOf } from "./gate.js";
 import { discardCoverageDir, mergeCoverage, readLcov } from "./lcov.js";
 import { ceilingHit, totalTokens, type RunLimits } from "./limits.js";
@@ -547,13 +548,32 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   const rules = rulesText(repo.runner, repo.disableRules);
   const backend = generatorBackend(config, repo);
   const subscription = backend === "claude-code";
+  const local = backend === "openai-compatible";
+  // Optional at the type level for configs built by hand, as the tests do.
+  const oc: Partial<Config["openai_compatible"]> = config.openai_compatible ?? {};
+  const localOpts = {
+    baseUrl: oc.base_url ?? "",
+    model: oc.model ?? "",
+    timeoutMs: oc.timeout_ms,
+    maxTokens: oc.max_tokens,
+    seed: oc.seed,
+  };
+  if (local) {
+    if (!localOpts.baseUrl || !localOpts.model) {
+      throw new Error("generator openai-compatible needs openai_compatible.base_url and openai_compatible.model");
+    }
+    await preflightOpenAICompatible(localOpts);
+    log.info({ repo: repo.name, model: localOpts.model }, "generator openai-compatible, no API cost");
+  }
   if (subscription) {
     const who = await preflightClaudeCode(
       claudeExec(config.claude_code.binary, tmpdir(), config.claude_code.timeout_ms),
     );
     log.info({ repo: repo.name, auth: who }, "generator claude-code, billed to the subscription");
   }
-  const generator = subscription
+  const generator = local
+    ? createOpenAICompatibleGenerator(localOpts)
+    : subscription
     ? createClaudeCodeGenerator({
         binary: config.claude_code.binary,
         model: config.anthropic.generator_model,
@@ -569,7 +589,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
   // the subscription backend: a repair resumes the generating session and only
   // that instance holds the session id, so one instance does both.
   const repairer =
-    subscription || config.anthropic.repair_model === config.anthropic.generator_model
+    subscription || local || config.anthropic.repair_model === config.anthropic.generator_model
       ? generator
       : createGenerator({
           model: config.anthropic.repair_model,
@@ -704,7 +724,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
       ): Promise<Candidate[]> => {
         const out = await mapLimit(
           segs,
-          subscription ? config.claude_code.concurrency : 0,
+          subscription ? config.claude_code.concurrency : local ? (oc.concurrency ?? 1) : 0,
           async (segment) => {
             const blocks = buildPromptBlocks({
               idiomPack,
@@ -896,7 +916,7 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
     const accepted = candidates.filter((c) => c.status === "accepted");
     // Generator and repairer can be different models, so price them separately
     // and only then add the dollars up.
-    const perModel = [{ model: config.anthropic.generator_model, tokens: readUsage(generator) }];
+    const perModel = [{ model: local ? localOpts.model : config.anthropic.generator_model, tokens: readUsage(generator) }];
     if (repairer !== generator) perModel.push({ model: config.anthropic.repair_model, tokens: readUsage(repairer) });
     const summary: RunSummary = {
       repo: repo.name,
@@ -909,7 +929,12 @@ export async function runPipeline(args: PipelineArgs): Promise<RunSummary> {
       aborted,
       journal: journalFile,
       // A subscription run has no dollar meter, so it reports tokens and nothing else.
-      cost: subscription ? undefined : runCost(perModel, priceTable(config)),
+      // A local model has no bill at all, which is a figure, not an unknown.
+      cost: subscription
+        ? undefined
+        : local
+          ? { usd: 0, byModel: [{ model: localOpts.model, usd: 0 }], partial: false }
+          : runCost(perModel, priceTable(config)),
       coverage: coverageBefore ? { before: coverageBefore, after: scopeCoverage(repo, baseline) } : undefined,
       durationMs: 0,
     };

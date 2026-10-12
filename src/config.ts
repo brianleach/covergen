@@ -15,7 +15,7 @@ import { ruleIds } from "./rules.js";
 import type { GeneratorBackend, RepoConfig, RunnerName } from "./types.js";
 
 const runnerNames = ["rspec", "vitest", "bun", "jest", "pytest", "go", "cargo", "node-test"] as const;
-const generatorBackends = ["api", "claude-code"] as const;
+const generatorBackends = ["api", "claude-code", "openai-compatible"] as const;
 
 /** True when this build has an adapter for `value`. */
 export function isRunnerName(value: string): value is RunnerName {
@@ -177,6 +177,23 @@ const ConfigSchema = z.object({
       timeout_ms: z.number().int().positive().default(600_000),
     })
     .default({}),
+  /**
+   * Options for the `openai-compatible` backend: a local model served on an
+   * OpenAI-compatible chat endpoint. `base_url` and `model` are required once any
+   * repo resolves to this backend; nothing is guessed. `seed` is sent with every
+   * request so two runs over the same targets draw the same samples where the
+   * server honors it.
+   */
+  openai_compatible: z
+    .object({
+      base_url: z.string().url().optional(),
+      model: z.string().min(1).optional(),
+      timeout_ms: z.number().int().positive().default(600_000),
+      max_tokens: z.number().int().positive().default(16384),
+      concurrency: z.number().int().min(1).default(1),
+      seed: z.number().int().optional(),
+    })
+    .default({}),
   anthropic: z
     .object({
       api_key_env: z.string().default("ANTHROPIC_API_KEY"),
@@ -268,6 +285,18 @@ const ConfigSchema = z.object({
    */
   refresh_base: z.boolean().default(true),
   repos: z.array(RepoSchema).min(1),
+}).superRefine((cfg, ctx) => {
+  const local = cfg.generator === "openai-compatible" || cfg.repos.some((r) => r.generator === "openai-compatible");
+  if (!local) return;
+  for (const key of ["base_url", "model"] as const) {
+    if (cfg.openai_compatible[key] === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["openai_compatible", key],
+        message: `generator openai-compatible needs openai_compatible.${key}`,
+      });
+    }
+  }
 });
 
 export type Config = Omit<z.infer<typeof ConfigSchema>, "repos"> & {

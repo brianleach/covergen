@@ -56,8 +56,11 @@ export interface NodeTestOptions {
   coverageInclude?: string[];
 }
 
-/** Which backend makes the model calls: the metered API, or a Claude subscription. */
-export type GeneratorBackend = "api" | "claude-code";
+/**
+ * Which backend makes the model calls: the metered API, a Claude subscription, or
+ * a local model behind an OpenAI-compatible chat endpoint (Ollama, for one).
+ */
+export type GeneratorBackend = "api" | "claude-code" | "openai-compatible";
 
 /** One repo entry from covergen.yaml, resolved (paths absolute). */
 /**
