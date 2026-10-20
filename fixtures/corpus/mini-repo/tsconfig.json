@@ -1,0 +1,2 @@
+// The nearest tsconfig: comments and trailing commas are allowed here.
+{ "extends": "./tsconfig.base", "compilerOptions": { "strict": true, }, }
