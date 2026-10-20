@@ -1,36 +1,36 @@
 {
   "tokenizer": "cl100k_base (js-tiktoken)",
-  "rows": 1476,
-  "candidate_pairs": 1491,
-  "duplicates_dropped": 1,
-  "size_ceiling_tokens": 23808,
+  "rows": 2210,
+  "candidate_pairs": 2234,
+  "duplicates_dropped": 2,
+  "size_ceiling_tokens": 42752,
   "size_ceiling_rule": "p99 of source_plus_test tokens after dedupe, rounded up to a multiple of 256",
-  "over_ceiling_dropped": 14,
+  "over_ceiling_dropped": 22,
   "distribution_before_ceiling": {
     "source": {
-      "p50": 598,
-      "p90": 3698,
-      "p99": 14794,
-      "max": 30956
+      "p50": 697,
+      "p90": 5755,
+      "p99": 41396,
+      "max": 44749
     },
     "test": {
-      "p50": 829,
-      "p90": 4348,
-      "p99": 15278,
-      "max": 43567
+      "p50": 906,
+      "p90": 5101,
+      "p99": 23052,
+      "max": 47264
     },
     "source_plus_test": {
-      "p50": 1759,
-      "p90": 7623,
-      "p99": 23791,
-      "max": 63527
+      "p50": 2122,
+      "p90": 12982,
+      "p99": 42511,
+      "max": 74671
     }
   },
   "pairs_per_repo": {
-    "vitest-dev/vitest": 33,
-    "vitejs/vite": 66,
-    "vuejs/core": 151,
-    "vueuse/vueuse": 215,
+    "vitest-dev/vitest": 80,
+    "vitejs/vite": 79,
+    "vuejs/core": 181,
+    "vueuse/vueuse": 220,
     "unjs/ofetch": 1,
     "unjs/defu": 2,
     "unjs/ufo": 13,
@@ -42,14 +42,14 @@
     "unjs/destr": 1,
     "unjs/c12": 6,
     "unjs/unimport": 27,
-    "colinhacks/zod": 57,
-    "TanStack/query": 79,
-    "honojs/hono": 120,
-    "trpc/trpc": 41,
+    "colinhacks/zod": 178,
+    "TanStack/query": 181,
+    "honojs/hono": 147,
+    "trpc/trpc": 177,
     "remeda/remeda": 172,
     "fabian-hiller/valibot": 287,
-    "mswjs/msw": 57,
-    "drizzle-team/drizzle-orm": 37
+    "mswjs/msw": 206,
+    "drizzle-team/drizzle-orm": 141
   },
   "seeds_run": 23,
   "seeds_total": 23

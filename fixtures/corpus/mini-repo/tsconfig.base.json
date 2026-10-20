@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["src/*"],
+      "#strings": ["src/strings.ts"],
+      "#utils": ["src/test-utils.ts"],
+      "fancy/*": ["src/*", "lib/*"],
+      "@two/*/x/*": ["src/*/*"],
+      "outside/*": ["../*"],
+    },
+  },
+}
