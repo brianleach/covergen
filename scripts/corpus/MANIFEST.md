@@ -7,11 +7,13 @@ workspace package names and plain tsconfig path aliases are tried, following the
 entry file's re-exports one level. Rows live in the gitignored
 output directory as `corpus.jsonl`; this file and `stats.json` are the tracked record.
 
-- Rows: 2210 (from 2234 candidate pairs)
+- Rows: 2267 (from 2291 candidate pairs)
 - Duplicates dropped (whitespace-normalized test hash, across repos): 2
 - Size ceiling: 42752 tokens of source plus test (p99 of source_plus_test tokens after dedupe, rounded up to a multiple of 256); 22 pairs over it dropped
+- Ceiling override: `--max-ceiling <tokens>` caps the ceiling at min(p99 rule, tokens). It is off
+  by default (this build: off) because a single outlier source file can move the p99 cap.
 - Tokenizer: cl100k_base (js-tiktoken). It is a proxy: the fine-tune model's own tokenizer will count differently.
-- Seeds run: 23 of 23
+- Seeds run: 25 of 25
 
 ## Provenance
 
@@ -49,6 +51,8 @@ verbatim from a public repository at the pinned commit.
 | fabian-hiller/valibot | [MIT](https://github.com/fabian-hiller/valibot/blob/2d29dbf04d272341a1e617070bd0b03eda8c4404/LICENSE.md) | 2d29dbf04d27 | ran | 287 | 287 | 287 | none |
 | mswjs/msw | [MIT](https://github.com/mswjs/msw/blob/3560a94e00ae2054ce0ea3aaad9fc6fb3892b6bf/LICENSE.md) | 3560a94e00ae | ran | 297 | 206 | 206 | no_resolvable_source 91 |
 | drizzle-team/drizzle-orm | [Apache-2.0](https://github.com/drizzle-team/drizzle-orm/blob/eab8bedbb65d5429c54e612ddbd88aa23091d398/LICENSE) | eab8bedbb65d | ran | 169 | 149 | 141 | no_resolvable_source 15, not_vitest 5, over_ceiling 8 |
+| pmndrs/zustand | [MIT](https://github.com/pmndrs/zustand/blob/382d29c485e67018c06e75ec7235130d0968522c/LICENSE) | 382d29c485e6 | ran | 13 | 13 | 13 | none |
+| pmndrs/jotai | [MIT](https://github.com/pmndrs/jotai/blob/e5971ba44866d070564a0a30187f6976fee0e350/LICENSE) | e5971ba44866 | ran | 44 | 44 | 44 | none |
 
 Drop reasons: `not_vitest` (no vitest import and no vitest dependency up the
 tree, or another runner imported), `no_resolvable_source` (no relative import,
@@ -62,6 +66,6 @@ missing, unclear or not the declared license is dropped whole.
 
 | Field | p50 | p90 | p99 |
 | --- | --- | --- | --- |
-| source | 697 | 5755 | 41396 |
-| test | 906 | 5101 | 23052 |
-| source_plus_test | 2122 | 12982 | 42511 |
+| source | 695 | 5755 | 41396 |
+| test | 927 | 5231 | 23052 |
+| source_plus_test | 2122 | 12915 | 42511 |

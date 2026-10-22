@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { checkLicense, classifyLicense } from "./license.js";
@@ -14,7 +15,8 @@ import {
   tsconfigAliases,
   workspacePackages,
 } from "./pair.js";
-import { ceilingFromP99, dedupe, percentile } from "./stats.js";
+import { parseSeeds, renderSeeds } from "./seeds.js";
+import { P99_CEILING_RULE, ceilingFromP99, dedupe, parseMaxCeiling, percentile, sizeCeiling } from "./stats.js";
 
 const mini = fileURLToPath(new URL("../../fixtures/corpus/mini-repo", import.meta.url));
 
@@ -173,5 +175,37 @@ describe("stats", () => {
     expect(percentile([], 99)).toBe(0);
     expect(ceilingFromP99(23791)).toBe(23808);
     expect(ceilingFromP99(10)).toBe(256);
+  });
+});
+
+describe("size ceiling override", () => {
+  it("keeps the p99 rule when no max is set", () => {
+    expect(sizeCeiling(42511)).toEqual({ tokens: 42752, rule: P99_CEILING_RULE });
+  });
+
+  it("caps the ceiling at the max and names the rule that produced it", () => {
+    expect(sizeCeiling(42511, 32768)).toEqual({ tokens: 32768, rule: "--max-ceiling 32768; the p99 rule gave 42752" });
+  });
+
+  it("leaves the p99 ceiling alone when the max is above it", () => {
+    const c = sizeCeiling(10000, 32768);
+    expect(c.tokens).toBe(10240);
+    expect(c.rule).toContain("not reached");
+  });
+
+  it("parses the flag as a positive integer and refuses anything else", () => {
+    expect(parseMaxCeiling(undefined)).toBeUndefined();
+    expect(parseMaxCeiling("32768")).toBe(32768);
+    for (const bad of ["0", "-5", "1.5", "abc", ""]) expect(() => parseMaxCeiling(bad)).toThrow(/--max-ceiling/);
+  });
+});
+
+describe("seeds file", () => {
+  it("round-trips through the loader in the form build.ts writes", () => {
+    const text = readFileSync(new URL("./seeds.yaml", import.meta.url), "utf8");
+    const seeds = parseSeeds(text);
+    expect(seeds.map((s) => s.repo)).toEqual(expect.arrayContaining(["pmndrs/zustand", "pmndrs/jotai"]));
+    expect(renderSeeds(seeds)).toBe(text);
+    expect(parseSeeds(renderSeeds(seeds))).toEqual(seeds);
   });
 });
