@@ -92,3 +92,11 @@ seeds:
     license: Apache-2.0
     commit: eab8bedbb65d5429c54e612ddbd88aa23091d398
     license_url: https://github.com/drizzle-team/drizzle-orm/blob/eab8bedbb65d5429c54e612ddbd88aa23091d398/LICENSE
+  - repo: pmndrs/zustand
+    license: MIT
+    commit: 382d29c485e67018c06e75ec7235130d0968522c
+    license_url: https://github.com/pmndrs/zustand/blob/382d29c485e67018c06e75ec7235130d0968522c/LICENSE
+  - repo: pmndrs/jotai
+    license: MIT
+    commit: e5971ba44866d070564a0a30187f6976fee0e350
+    license_url: https://github.com/pmndrs/jotai/blob/e5971ba44866d070564a0a30187f6976fee0e350/LICENSE

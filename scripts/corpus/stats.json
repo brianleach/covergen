@@ -1,27 +1,28 @@
 {
   "tokenizer": "cl100k_base (js-tiktoken)",
-  "rows": 2210,
-  "candidate_pairs": 2234,
+  "rows": 2267,
+  "candidate_pairs": 2291,
   "duplicates_dropped": 2,
   "size_ceiling_tokens": 42752,
   "size_ceiling_rule": "p99 of source_plus_test tokens after dedupe, rounded up to a multiple of 256",
+  "size_ceiling_max": null,
   "over_ceiling_dropped": 22,
   "distribution_before_ceiling": {
     "source": {
-      "p50": 697,
+      "p50": 695,
       "p90": 5755,
       "p99": 41396,
       "max": 44749
     },
     "test": {
-      "p50": 906,
-      "p90": 5101,
+      "p50": 927,
+      "p90": 5231,
       "p99": 23052,
       "max": 47264
     },
     "source_plus_test": {
       "p50": 2122,
-      "p90": 12982,
+      "p90": 12915,
       "p99": 42511,
       "max": 74671
     }
@@ -49,8 +50,10 @@
     "remeda/remeda": 172,
     "fabian-hiller/valibot": 287,
     "mswjs/msw": 206,
-    "drizzle-team/drizzle-orm": 141
+    "drizzle-team/drizzle-orm": 141,
+    "pmndrs/zustand": 13,
+    "pmndrs/jotai": 44
   },
-  "seeds_run": 23,
-  "seeds_total": 23
+  "seeds_run": 25,
+  "seeds_total": 25
 }
