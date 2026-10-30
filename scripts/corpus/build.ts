@@ -3,6 +3,7 @@
  * tests with sources, dedupes, applies the p99 size ceiling, writes <out>/corpus.jsonl plus
  * MANIFEST.md and stats.json beside the seed list. Seed checkouts are read, never run.
  *   node --import tsx scripts/corpus/build.ts --seeds <seeds.yaml> --out <dir> [--clones <dir>] [--only a/b,c/d]
+ *     [--max-ceiling <tokens>]
  */
 
 import { execFileSync } from "node:child_process";
@@ -10,22 +11,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { getEncoding } from "js-tiktoken";
-import { parse as parseYaml, stringify } from "yaml";
-import { z } from "zod";
-import { ALLOWED_LICENSES, checkLicense, findLicenseFile } from "./license.js";
+import { checkLicense, findLicenseFile } from "./license.js";
 import { pairRepo } from "./pair.js";
-import { type Percentiles, type Row, ceilingFromP99, dedupe, summarize } from "./stats.js";
+import { type Seed, parseSeeds, renderSeeds } from "./seeds.js";
+import { type Percentiles, type Row, dedupe, parseMaxCeiling, sizeCeiling, summarize } from "./stats.js";
 
 const TOKENIZER = "cl100k_base (js-tiktoken)";
-
-const Seed = z.object({
-  repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
-  license: z.enum(ALLOWED_LICENSES),
-  commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
-  license_url: z.string().url().optional(),
-});
-type Seed = z.infer<typeof Seed>;
-const SeedFile = z.object({ seeds: z.array(Seed).min(1) });
 
 type ManifestStats = Record<string, unknown> & {
   distribution_before_ceiling: Record<"source" | "test" | "source_plus_test", Percentiles>;
@@ -69,13 +60,17 @@ function checkout(seed: Seed, dir: string): string {
 
 function main(): void {
   const { values } = parseArgs({
-    options: { seeds: { type: "string" }, out: { type: "string" }, clones: { type: "string" }, only: { type: "string" } },
+    options: {
+      ...{ seeds: { type: "string" }, out: { type: "string" }, clones: { type: "string" } },
+      ...{ only: { type: "string" }, "max-ceiling": { type: "string" } },
+    },
   });
   if (!values.seeds || !values.out) throw new Error("usage: build.ts --seeds <seeds.yaml> --out <dir>");
   const { seeds: seedsFile, out } = values;
   const clones = values.clones ?? join(out, "clones");
   const only = values.only ? new Set(values.only.split(",")) : null;
-  const { seeds } = SeedFile.parse(parseYaml(readFileSync(seedsFile, "utf8")));
+  const maxCeiling = parseMaxCeiling(values["max-ceiling"]);
+  const seeds = parseSeeds(readFileSync(seedsFile, "utf8"));
   const owner = selfOwner();
   const own = seeds.find((s) => s.repo.split("/")[0]!.toLowerCase() === owner);
   if (own) throw new Error(`seed ${own.repo} belongs to this repository's owner`);
@@ -122,7 +117,7 @@ function main(): void {
   const distribution = Object.fromEntries(
     Object.entries(fields).map(([name, key]) => [name, summarize(measured.map((m) => m[key]))]),
   ) as Record<keyof typeof fields, Percentiles>;
-  const ceiling = ceilingFromP99(distribution.source_plus_test.p99);
+  const { tokens: ceiling, rule: ceilingRule } = sizeCeiling(distribution.source_plus_test.p99, maxCeiling);
   const rows = measured.filter((m) => m.pair <= ceiling);
   for (const m of measured) {
     const r = results.find((x) => x.seed.repo === m.row.repo)!;
@@ -142,7 +137,8 @@ function main(): void {
     candidate_pairs: candidates.length,
     duplicates_dropped: dropped,
     size_ceiling_tokens: ceiling,
-    size_ceiling_rule: "p99 of source_plus_test tokens after dedupe, rounded up to a multiple of 256",
+    size_ceiling_rule: ceilingRule,
+    size_ceiling_max: maxCeiling ?? null,
     over_ceiling_dropped: measured.length - rows.length,
     distribution_before_ceiling: distribution,
     pairs_per_repo: Object.fromEntries(results.filter((r) => r.status === "ran").map((r) => [r.seed.repo, r.rows])),
@@ -152,8 +148,7 @@ function main(): void {
   const manifestDir = dirname(seedsFile);
   writeFileSync(join(manifestDir, "stats.json"), `${JSON.stringify(stats, null, 2)}\n`);
   writeFileSync(join(manifestDir, "MANIFEST.md"), renderManifest(results, stats));
-  const header = "# Corpus seeds. commit and license_url are pinned by build.ts on first run.\n";
-  writeFileSync(seedsFile, header + stringify({ seeds }, { lineWidth: 0 }));
+  writeFileSync(seedsFile, renderSeeds(seeds));
   console.log(`rows=${rows.length} duplicates=${dropped} ceiling=${ceiling} seeds_run=${stats.seeds_run}`);
 }
 
@@ -177,6 +172,8 @@ output directory as \`corpus.jsonl\`; this file and \`stats.json\` are the track
 - Rows: ${stats.rows} (from ${stats.candidate_pairs} candidate pairs)
 - Duplicates dropped (whitespace-normalized test hash, across repos): ${stats.duplicates_dropped}
 - Size ceiling: ${stats.size_ceiling_tokens} tokens of source plus test (${stats.size_ceiling_rule}); ${stats.over_ceiling_dropped} pairs over it dropped
+- Ceiling override: \`--max-ceiling <tokens>\` caps the ceiling at min(p99 rule, tokens). It is off
+  by default (this build: ${stats.size_ceiling_max ?? "off"}) because a single outlier source file can move the p99 cap.
 - Tokenizer: ${TOKENIZER}. It is a proxy: the fine-tune model's own tokenizer will count differently.
 - Seeds run: ${stats.seeds_run} of ${stats.seeds_total}
 
