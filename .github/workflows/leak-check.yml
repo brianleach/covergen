@@ -16,6 +16,7 @@ jobs:
   leak-check:
     name: leak-check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       # fetch-depth 0 so the base..HEAD commit message range resolves.
       - uses: actions/checkout@v4

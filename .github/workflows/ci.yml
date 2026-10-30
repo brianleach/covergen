@@ -2,8 +2,10 @@ name: ci
 
 on:
   pull_request:
+    paths-ignore: ["docs/**", "**/*.md"]
   push:
     branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]
 
 permissions:
   contents: read
@@ -16,6 +18,7 @@ jobs:
   gates:
     name: gates
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
