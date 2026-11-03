@@ -2,17 +2,20 @@
  * Training corpus builder: clones each seed at its pinned commit, checks its LICENSE, pairs
  * tests with sources, dedupes, applies the p99 size ceiling, writes <out>/corpus.jsonl plus
  * MANIFEST.md and stats.json beside the seed list. Seed checkouts are read, never run.
+ * With --only, the stats and manifest go to <out>/stats.only.json and <out>/MANIFEST.only.md
+ * instead, so a partial run never rewrites the tracked record.
  *   node --import tsx scripts/corpus/build.ts --seeds <seeds.yaml> --out <dir> [--clones <dir>] [--only a/b,c/d]
  *     [--max-ceiling <tokens>]
  */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { getEncoding } from "js-tiktoken";
 import { checkLicense, findLicenseFile } from "./license.js";
 import { pairRepo } from "./pair.js";
+import { recordPaths, writeRecord } from "./record.js";
 import { type Seed, parseSeeds, renderSeeds } from "./seeds.js";
 import { type Percentiles, type Row, dedupe, parseMaxCeiling, sizeCeiling, summarize } from "./stats.js";
 
@@ -145,11 +148,11 @@ function main(): void {
     seeds_run: results.filter((r) => r.status === "ran").length,
     seeds_total: results.length,
   };
-  const manifestDir = dirname(seedsFile);
-  writeFileSync(join(manifestDir, "stats.json"), `${JSON.stringify(stats, null, 2)}\n`);
-  writeFileSync(join(manifestDir, "MANIFEST.md"), renderManifest(results, stats));
+  const paths = recordPaths(seedsFile, out, only !== null);
+  writeRecord(paths, stats, renderManifest(results, stats));
   writeFileSync(seedsFile, renderSeeds(seeds));
   console.log(`rows=${rows.length} duplicates=${dropped} ceiling=${ceiling} seeds_run=${stats.seeds_run}`);
+  if (only) console.log(`--only run: wrote ${paths.stats} and ${paths.manifest}; the tracked record is unchanged`);
 }
 
 function renderManifest(results: SeedResult[], stats: ManifestStats): string {

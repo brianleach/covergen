@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { checkLicense, classifyLicense } from "./license.js";
@@ -15,6 +17,7 @@ import {
   tsconfigAliases,
   workspacePackages,
 } from "./pair.js";
+import { recordPaths, writeRecord } from "./record.js";
 import { parseSeeds, renderSeeds } from "./seeds.js";
 import { P99_CEILING_RULE, ceilingFromP99, dedupe, parseMaxCeiling, percentile, sizeCeiling } from "./stats.js";
 
@@ -207,5 +210,51 @@ describe("seeds file", () => {
     expect(seeds.map((s) => s.repo)).toEqual(expect.arrayContaining(["pmndrs/zustand", "pmndrs/jotai"]));
     expect(renderSeeds(seeds)).toBe(text);
     expect(parseSeeds(renderSeeds(seeds))).toEqual(seeds);
+  });
+});
+
+describe("record paths", () => {
+  const tracked = fileURLToPath(new URL("./stats.json", import.meta.url));
+  const trackedManifest = fileURLToPath(new URL("./MANIFEST.md", import.meta.url));
+
+  function workspace(): { seeds: string; out: string; stats: string; manifest: string; cleanup: () => void } {
+    const root = mkdtempSync(join(tmpdir(), "corpus-record-"));
+    const seeds = join(root, "seeds.yaml");
+    writeFileSync(seeds, "");
+    writeFileSync(join(root, "stats.json"), readFileSync(tracked));
+    writeFileSync(join(root, "MANIFEST.md"), readFileSync(trackedManifest));
+    const out = join(root, "out");
+    const cleanup = () => rmSync(root, { recursive: true, force: true });
+    return { seeds, out, stats: join(root, "stats.json"), manifest: join(root, "MANIFEST.md"), cleanup };
+  }
+
+  it("an --only run leaves the tracked stats and manifest bytes unchanged", () => {
+    const w = workspace();
+    try {
+      const before = [readFileSync(w.stats), readFileSync(w.manifest)];
+      const paths = recordPaths(w.seeds, w.out, true);
+      writeRecord(paths, { rows: 1, seeds_run: 1 }, "# partial\n");
+      expect(readFileSync(w.stats).equals(before[0]!)).toBe(true);
+      expect(readFileSync(w.manifest).equals(before[1]!)).toBe(true);
+      expect(paths).toEqual({ stats: join(w.out, "stats.only.json"), manifest: join(w.out, "MANIFEST.only.md") });
+      expect(JSON.parse(readFileSync(paths.stats, "utf8"))).toEqual({ rows: 1, seeds_run: 1 });
+      expect(readFileSync(paths.manifest, "utf8")).toBe("# partial\n");
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a full run still writes stats.json and MANIFEST.md beside the seed list", () => {
+    const w = workspace();
+    try {
+      const paths = recordPaths(w.seeds, w.out, false);
+      expect(paths).toEqual({ stats: w.stats, manifest: w.manifest });
+      writeRecord(paths, { rows: 2 }, "# full\n");
+      expect(readFileSync(w.stats, "utf8")).toBe(`${JSON.stringify({ rows: 2 }, null, 2)}\n`);
+      expect(readFileSync(w.manifest, "utf8")).toBe("# full\n");
+      expect(existsSync(join(w.out, "stats.only.json"))).toBe(false);
+    } finally {
+      w.cleanup();
+    }
   });
 });

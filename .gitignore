@@ -14,3 +14,6 @@ fixtures/rust-min/target/
 fixtures/rust-min/Cargo.lock
 # Training corpus output (scripts/corpus/build.ts --out).
 /corpus-out/
+# Stats and manifest of a partial build (build.ts --only); only full runs write the tracked record.
+stats.only.json
+MANIFEST.only.md
