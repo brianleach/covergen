@@ -17,7 +17,7 @@ import {
   tsconfigAliases,
   workspacePackages,
 } from "./pair.js";
-import { recordPaths, writeRecord } from "./record.js";
+import { recordPaths, writeRecord, writeSeedsFile } from "./record.js";
 import { parseSeeds, renderSeeds } from "./seeds.js";
 import { P99_CEILING_RULE, ceilingFromP99, dedupe, parseMaxCeiling, percentile, sizeCeiling } from "./stats.js";
 
@@ -255,6 +255,57 @@ describe("record paths", () => {
       expect(existsSync(join(w.out, "stats.only.json"))).toBe(false);
     } finally {
       w.cleanup();
+    }
+  });
+});
+
+describe("seeds file writes", () => {
+  const trackedSeeds = fileURLToPath(new URL("./seeds.yaml", import.meta.url));
+  const moved = "0".repeat(40);
+
+  /** A copy of the tracked seeds file and the seed list a run would hold after re-pinning a moved ref. */
+  function repinned(): { file: string; seeds: ReturnType<typeof parseSeeds>; cleanup: () => void } {
+    const root = mkdtempSync(join(tmpdir(), "corpus-seeds-"));
+    const file = join(root, "seeds.yaml");
+    writeFileSync(file, readFileSync(trackedSeeds));
+    const seeds = parseSeeds(readFileSync(file, "utf8"));
+    expect(seeds[0]!.commit).not.toBe(moved);
+    seeds[0]!.commit = moved;
+    return { file, seeds, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it("an --only run leaves the seeds file bytes untouched even when a seed re-pinned", () => {
+    const w = repinned();
+    try {
+      const before = readFileSync(w.file);
+      expect(writeSeedsFile(w.file, w.seeds, true)).toBe(false);
+      expect(readFileSync(w.file).equals(before)).toBe(true);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a full run rewrites the seeds file with the re-pinned commit", () => {
+    const w = repinned();
+    try {
+      expect(writeSeedsFile(w.file, w.seeds, false)).toBe(true);
+      expect(readFileSync(w.file, "utf8")).toBe(renderSeeds(w.seeds));
+      expect(parseSeeds(readFileSync(w.file, "utf8"))[0]!.commit).toBe(moved);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  it("a full run over an unchanged seed set writes the same bytes", () => {
+    const root = mkdtempSync(join(tmpdir(), "corpus-seeds-"));
+    try {
+      const file = join(root, "seeds.yaml");
+      const before = readFileSync(trackedSeeds);
+      writeFileSync(file, before);
+      writeSeedsFile(file, parseSeeds(before.toString("utf8")), false);
+      expect(readFileSync(file).equals(before)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
