@@ -3,7 +3,7 @@
  * tests with sources, dedupes, applies the p99 size ceiling, writes <out>/corpus.jsonl plus
  * MANIFEST.md and stats.json beside the seed list. Seed checkouts are read, never run.
  * With --only, the stats and manifest go to <out>/stats.only.json and <out>/MANIFEST.only.md
- * instead, so a partial run never rewrites the tracked record.
+ * instead, and the seeds file is not rewritten, so a partial run never changes tracked state.
  *   node --import tsx scripts/corpus/build.ts --seeds <seeds.yaml> --out <dir> [--clones <dir>] [--only a/b,c/d]
  *     [--max-ceiling <tokens>]
  */
@@ -15,8 +15,8 @@ import { parseArgs } from "node:util";
 import { getEncoding } from "js-tiktoken";
 import { checkLicense, findLicenseFile } from "./license.js";
 import { pairRepo } from "./pair.js";
-import { recordPaths, writeRecord } from "./record.js";
-import { type Seed, parseSeeds, renderSeeds } from "./seeds.js";
+import { recordPaths, writeRecord, writeSeedsFile } from "./record.js";
+import { type Seed, parseSeeds } from "./seeds.js";
 import { type Percentiles, type Row, dedupe, parseMaxCeiling, sizeCeiling, summarize } from "./stats.js";
 
 const TOKENIZER = "cl100k_base (js-tiktoken)";
@@ -150,9 +150,9 @@ function main(): void {
   };
   const paths = recordPaths(seedsFile, out, only !== null);
   writeRecord(paths, stats, renderManifest(results, stats));
-  writeFileSync(seedsFile, renderSeeds(seeds));
+  writeSeedsFile(seedsFile, seeds, only !== null);
   console.log(`rows=${rows.length} duplicates=${dropped} ceiling=${ceiling} seeds_run=${stats.seeds_run}`);
-  if (only) console.log(`--only run: wrote ${paths.stats} and ${paths.manifest}; the tracked record is unchanged`);
+  if (only) console.log(`--only run: wrote ${paths.stats} and ${paths.manifest}; the tracked record and ${seedsFile} are unchanged`);
 }
 
 function renderManifest(results: SeedResult[], stats: ManifestStats): string {
