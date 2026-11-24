@@ -40,9 +40,30 @@ interface Fixture {
   /** Function that no test reaches. Its lines must all be uncovered. */
   uncoveredSymbol: string;
   available: () => boolean;
+  /** Why the fixture is skipped here, naming the probe that failed. Shown in the skipped test's title. */
+  skipReason?: string;
   /** Overrides the default per-test ceiling. Rust compiles before it measures. */
   timeoutMs?: number;
 }
+
+/**
+ * Why the rspec fixture cannot run here, or undefined when it can. bundler on
+ * PATH is not enough: the fixture's bundle has to be installed too, which
+ * `bundle exec rspec --version` in the fixture directory proves (the same probe
+ * the runner's preflight makes). Used to skip, never to fail.
+ */
+function rspecBundleMissing(): string | undefined {
+  if (!onPath("bundle")) return "`bundle --version` failed: bundler is not on PATH";
+  try {
+    const res = spawnSync("bundle", ["exec", "rspec", "--version"], { cwd: findRepo(config, "rspec-min").cwd, stdio: "ignore" });
+    if (res.status === 0) return undefined;
+    return `\`bundle exec rspec --version\` exited ${res.status ?? "on a signal"} in fixtures/rspec-min: run bundle install there`;
+  } catch {
+    return "`bundle exec rspec --version` could not be spawned in fixtures/rspec-min";
+  }
+}
+
+const rspecSkip = rspecBundleMissing();
 
 const fixtures: Fixture[] = [
   {
@@ -60,7 +81,13 @@ const fixtures: Fixture[] = [
   },
   // Ruby fixture: needs bundler plus an installed bundle (rspec, simplecov,
   // simplecov-lcov). Skipped wherever that is not present.
-  { repo: "rspec-min", target: "lib/quota.rb", uncoveredSymbol: "tier", available: () => onPath("bundle") },
+  {
+    repo: "rspec-min",
+    target: "lib/quota.rb",
+    uncoveredSymbol: "tier",
+    available: () => rspecSkip === undefined,
+    skipReason: rspecSkip,
+  },
   // pytest alone writes no lcov, so pytest-cov is what decides this one.
   { repo: "pytest-min", target: "src/shop/rates.py", uncoveredSymbol: "refund_fee", available: () => hasPytestCov("pytest-min") },
   // `go version`, not `go --version`, which the tool does not accept.
@@ -133,10 +160,12 @@ function bodyLines(source: string, symbol: string): number[] {
 describe("fixture repos", () => {
   for (const fixture of fixtures) {
     const repo: RepoConfig = findRepo(config, fixture.repo);
-    const run = fixture.available() ? it : it.skip;
+    const available = fixture.available();
+    const run = available ? it : it.skip;
+    const skipped = !available && fixture.skipReason ? ` (skipped: ${fixture.skipReason})` : "";
 
     run(
-      `${fixture.repo}: preflight passes, the baseline reports the uncovered function, and segments cover it`,
+      `${fixture.repo}: preflight passes, the baseline reports the uncovered function, and segments cover it${skipped}`,
       async () => {
         const runner = getRunner(repo.runner);
         await runner.preflight(repo);
