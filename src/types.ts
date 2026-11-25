@@ -82,6 +82,12 @@ export interface ExploreOptions {
   ignorePatterns: string[];
   /** Glob, relative to cwd, for the end to end specs that already exist. */
   specGlob: string;
+  /** Routes queued right after the base URL, for client-side routes no link reaches. */
+  seedRoutes: string[];
+  /** Seed the in-scope entries of /sitemap.xml too. */
+  sitemap: boolean;
+  /** An element only a logged-in page shows, checked on the first page. */
+  loggedIn?: { role: string; name: string };
 }
 
 export interface RepoConfig {

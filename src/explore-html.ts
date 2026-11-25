@@ -5,9 +5,10 @@
  * Hand-rolled rather than a parser dependency, and shared by both readers: the
  * browser reader hands `page.content()` to the same function, so a client-side
  * app's rendered DOM and a static fixture page go through one implementation that
- * unit tests drive with no browser at all. The naming is an approximation of an
- * accessible name, not the accessibility tree's answer; docs/explore-mode.md says
- * where that costs us.
+ * unit tests drive with no browser at all. Names follow the accessible-name
+ * order (aria-labelledby, aria-label, an associated label, own text, then title,
+ * placeholder and value), which covers what a static page can say; the browser
+ * reader then corrects them against the accessibility tree.
  */
 
 import type { FlowElement, PageReader, PageSnapshot } from "./explore.js";
@@ -53,27 +54,97 @@ export function roleOf(tag: string, attrs: Record<string, string>): string | und
   return "textbox";
 }
 
-/** aria-label, then the attributes a control offers, then its own text. */
-function nameOf(attrs: Record<string, string>, text: string): string {
-  return collapse(attrs["aria-label"] ?? text ?? "") || collapse(attrs["placeholder"] ?? attrs["value"] ?? attrs["title"] ?? attrs["name"] ?? "");
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+const LABELABLE = new Set(["button", "input", "select", "textarea"]);
+
+/** Index of the tag closing the `tag` opened just before `from`, counting nesting. */
+function closeOf(html: string, tag: string, from: number): number {
+  const re = new RegExp(`<(/?)${tag}\\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "gi");
+  re.lastIndex = from;
+  let depth = 1;
+  for (let match = re.exec(html); match; match = re.exec(html)) {
+    depth += match[1] === "/" ? -1 : 1;
+    if (depth === 0) return match.index;
+  }
+  return html.length;
+}
+
+/** Text content of a fragment: an image speaks through its alt, a nested control's own text is not label text. */
+function textOf(fragment: string): string {
+  const stripped = fragment
+    .replaceAll(/<(select|textarea)\b[\s\S]*?<\/\1>/gi, " ")
+    .replaceAll(/<img\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi, (_, raw: string) => ` ${parseAttrs(raw)["alt"] ?? ""} `)
+    .replaceAll(/<[^>]*>/g, " ");
+  return collapse(decodeText(stripped));
+}
+
+/** What the first pass learns: text by id, label text by `for`, and the ranges wrapping labels cover. */
+interface NameSources {
+  ids: Map<string, string>;
+  labelFor: Map<string, string>;
+  wrapping: { from: number; to: number; text: string }[];
+}
+
+function collectNameSources(html: string): NameSources {
+  const sources: NameSources = { ids: new Map(), labelFor: new Map(), wrapping: [] };
+  for (const match of html.matchAll(TAG)) {
+    if (match[1] === "/") continue;
+    const tag = (match[2] ?? "").toLowerCase();
+    const attrs = parseAttrs(match[3] ?? "");
+    const from = match.index + match[0].length;
+    if (VOID.has(tag) || match[0].endsWith("/>")) continue;
+    if (attrs["id"] === undefined && tag !== "label") continue;
+    const text = textOf(html.slice(from, closeOf(html, tag, from)));
+    if (attrs["id"] !== undefined && !sources.ids.has(attrs["id"])) sources.ids.set(attrs["id"], text);
+    if (tag !== "label") continue;
+    if (attrs["for"] !== undefined) {
+      if (!sources.labelFor.has(attrs["for"])) sources.labelFor.set(attrs["for"], text);
+    } else sources.wrapping.push({ from, to: closeOf(html, tag, from), text });
+  }
+  return sources;
+}
+
+/** The accessible-name order, first non-empty source wins. */
+function nameOf(attrs: Record<string, string>, text: string, label: string | undefined, ids: Map<string, string>): string {
+  const labelledBy = (attrs["aria-labelledby"] ?? "")
+    .split(/\s+/)
+    .filter((id) => id.length > 0)
+    .map((id) => ids.get(id) ?? "")
+    .join(" ");
+  const candidates = [labelledBy, attrs["aria-label"], label, text, attrs["title"], attrs["placeholder"], attrs["value"]];
+  for (const candidate of candidates) {
+    const name = collapse(candidate ?? "");
+    if (name.length > 0) return name;
+  }
+  return "";
 }
 
 /**
  * Parse one page. `url` is the absolute URL it was read from, used to resolve
  * relative hrefs. Links are returned absolute and unfiltered; the crawl decides
- * which are in scope.
+ * which are in scope. Two passes: the first collects what other elements say
+ * about a control (ids, labels), the second names each control from them.
  */
-export function parseSnapshot(html: string, url: string): PageSnapshot {
+export function parseSnapshot(page: string, url: string): PageSnapshot {
+  // Script and style bodies are not markup: a tag inside a string literal is not an element.
+  const html = page.replaceAll(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, "");
   const title = collapse(decodeText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""));
+  const sources = collectNameSources(html);
   const links: string[] = [];
   const elements: FlowElement[] = [];
   let formDepth = 0;
   // The one open element still collecting its text, if any. Nesting an anchor in
   // a button is invalid HTML, so one slot is enough.
-  let open: { tag: string; role: string; attrs: Record<string, string>; from: number } | undefined;
+  let open: { tag: string; role: string; attrs: Record<string, string>; from: number; label?: string } | undefined;
 
-  const push = (role: string, attrs: Record<string, string>, text: string, inForm: boolean) => {
-    const name = nameOf(attrs, text);
+  const labelAt = (tag: string, attrs: Record<string, string>, at: number): string | undefined => {
+    if (!LABELABLE.has(tag)) return undefined;
+    const byFor = attrs["id"] === undefined ? undefined : sources.labelFor.get(attrs["id"]);
+    return byFor ?? sources.wrapping.find((range) => at >= range.from && at < range.to)?.text;
+  };
+
+  const push = (role: string, attrs: Record<string, string>, text: string, label: string | undefined, inForm: boolean) => {
+    const name = nameOf(attrs, text, label, sources.ids);
     const submits = role === "button" && (attrs["type"] ?? "").toLowerCase() !== "button" && (attrs["type"] ?? "").toLowerCase() !== "reset";
     const mutating = (inForm && (role !== "link" || submits)) || DESTRUCTIVE.test(name);
     elements.push({ role, name, mutating });
@@ -89,7 +160,7 @@ export function parseSnapshot(html: string, url: string): PageSnapshot {
       continue;
     }
     if (open && closing && tag === open.tag) {
-      push(open.role, open.attrs, decodeText(html.slice(open.from, match.index).replaceAll(/<[^>]*>/g, " ")), formDepth > 0);
+      push(open.role, open.attrs, textOf(html.slice(open.from, match.index)), open.label, formDepth > 0);
       open = undefined;
       continue;
     }
@@ -103,10 +174,71 @@ export function parseSnapshot(html: string, url: string): PageSnapshot {
     }
     const role = roleOf(tag, attrs);
     if (role === undefined) continue;
-    if (tag === "a" || tag === "button") open = { tag, role, attrs, from: end };
-    else push(role, attrs, "", formDepth > 0);
+    const label = labelAt(tag, attrs, match.index);
+    if (tag === "a" || tag === "button") open = { tag, role, attrs, from: end, label };
+    else push(role, attrs, "", label, formDepth > 0);
   }
   return { url, title, links, elements };
+}
+
+/** The roles worth a target. Structure (headings, lists, landmarks) and plain text are not. */
+const INTERACTIVE = new Set([
+  "link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "switch",
+  "slider", "spinbutton", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option",
+]);
+
+/**
+ * The interactive entries of a Playwright aria snapshot, in document order. The
+ * snapshot is YAML shaped: `- role "name" [attrs]:` per node, with text and
+ * property lines (`- text: ...`, `- /url: ...`) that are not elements.
+ */
+export function parseAriaSnapshot(text: string): { role: string; name: string }[] {
+  const out: { role: string; name: string }[] = [];
+  for (const line of text.split("\n")) {
+    const match = line.match(/^\s*-\s+([a-z]+)(?:\s+"((?:[^"\\]|\\.)*)")?/);
+    if (!match || !INTERACTIVE.has(match[1] ?? "")) continue;
+    let name = match[2] ?? "";
+    try {
+      name = JSON.parse(`"${name}"`) as string;
+    } catch {
+      // An escape JSON does not know; the raw text is the better guess.
+    }
+    out.push({ role: match[1] as string, name: collapse(name) });
+  }
+  return out;
+}
+
+/**
+ * Correct the HTML parse with the accessibility tree. Per role, in document
+ * order, the nth parsed element pairs with the nth snapshot entry: a different
+ * name takes the snapshot's, the `mutating` flag stays the parser's. Entries only
+ * the snapshot has (script-rendered, shadow DOM) are appended, and since nothing
+ * says whether they write, everything but a plainly named link counts as mutating.
+ */
+export function mergeAriaNames(
+  parsed: readonly FlowElement[],
+  aria: readonly { role: string; name: string }[],
+): { elements: FlowElement[]; corrected: number; appended: number } {
+  const byRole = new Map<string, { role: string; name: string }[]>();
+  for (const entry of aria) byRole.set(entry.role, [...(byRole.get(entry.role) ?? []), entry]);
+  const used = new Map<string, number>();
+  let corrected = 0;
+  const elements = parsed.map((element) => {
+    const index = used.get(element.role) ?? 0;
+    used.set(element.role, index + 1);
+    const match = byRole.get(element.role)?.[index];
+    if (!match || match.name === element.name) return element;
+    corrected += 1;
+    return { ...element, name: match.name };
+  });
+  let appended = 0;
+  for (const [role, entries] of byRole) {
+    for (const entry of entries.slice(used.get(role) ?? 0)) {
+      appended += 1;
+      elements.push({ role, name: entry.name, mutating: role !== "link" || DESTRUCTIVE.test(entry.name) });
+    }
+  }
+  return { elements, corrected, appended };
 }
 
 /**

@@ -9,6 +9,7 @@
  * testable against a fixture site with no browser.
  */
 
+import { targetKey } from "./explore-specs.js";
 import type { ExploreOptions } from "./types.js";
 
 /** One interactive element, as a Playwright spec would address it. */
@@ -29,6 +30,8 @@ export interface PageSnapshot {
   /** Absolute hrefs found on the page, in document order and unfiltered. */
   links: string[];
   elements: FlowElement[];
+  /** True when the crawl first reached this page from explore.seed_routes or the sitemap. */
+  seeded?: boolean;
 }
 
 /** Reads pages read-only. One implementation per backend, browser or static. */
@@ -107,29 +110,113 @@ export function inScope(url: string, base: string, ignore: readonly string[]): b
  * reader navigates and reads, it never clicks, fills or submits. A route already
  * seen is not read again, so a list of a thousand items costs one page. Stops at
  * `maxPages`, which is the only thing between a crawl and a whole site.
+ *
+ * `seeds` (seed routes, sitemap entries) queue right after the base URL, for the
+ * routes a client-side router reaches without a link; they pass the same scope
+ * and ignore checks and the same ceiling. `verify` sees the first page before
+ * anything else is read, and stops the crawl by throwing.
  */
 export async function crawl(
   reader: PageReader,
-  opts: { baseUrl: string; maxPages: number; ignore: readonly string[] },
+  opts: {
+    baseUrl: string;
+    maxPages: number;
+    ignore: readonly string[];
+    seeds?: readonly string[];
+    verify?: (first: PageSnapshot) => void;
+  },
 ): Promise<PageSnapshot[]> {
   const seen = new Set<string>();
-  const queue: string[] = [opts.baseUrl];
+  const queue: { url: string; seeded: boolean }[] = [{ url: opts.baseUrl, seeded: false }];
+  for (const seed of opts.seeds ?? []) {
+    try {
+      queue.push({ url: new URL(seed, opts.baseUrl).href, seeded: true });
+    } catch {
+      // A malformed seed is not a route.
+    }
+  }
   const pages: PageSnapshot[] = [];
   while (queue.length > 0 && pages.length < opts.maxPages) {
-    const next = queue.shift() as string;
-    if (!inScope(next, opts.baseUrl, opts.ignore)) continue;
-    const route = normalizeRoute(next, opts.baseUrl);
+    const next = queue.shift() as { url: string; seeded: boolean };
+    if (!inScope(next.url, opts.baseUrl, opts.ignore)) continue;
+    const route = normalizeRoute(next.url, opts.baseUrl);
     if (seen.has(route)) continue;
     seen.add(route);
-    const snapshot = await reader.read(next);
-    pages.push(snapshot);
+    const snapshot = await reader.read(next.url);
+    pages.push(next.seeded ? { ...snapshot, seeded: true } : snapshot);
+    if (pages.length === 1) opts.verify?.(snapshot);
     for (const link of snapshot.links) {
       if (!inScope(link, opts.baseUrl, opts.ignore)) continue;
       if (seen.has(normalizeRoute(link, opts.baseUrl))) continue;
-      queue.push(new URL(link, opts.baseUrl).href);
+      queue.push({ url: new URL(link, opts.baseUrl).href, seeded: false });
     }
   }
   return pages;
+}
+
+/**
+ * The in-scope `<loc>` entries of a sitemap, once per route: off-origin and
+ * ignored entries go, as does a second URL for a route already listed.
+ */
+export function parseSitemap(xml: string, base: string, ignore: readonly string[] = []): string[] {
+  const routes = new Set<string>();
+  const out: string[] = [];
+  for (const match of xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)) {
+    const loc = (match[1] ?? "").replaceAll("&amp;", "&");
+    if (!inScope(loc, base, ignore)) continue;
+    const route = normalizeRoute(loc, base);
+    if (routes.has(route)) continue;
+    routes.add(route);
+    out.push(new URL(loc, base).href);
+  }
+  return out;
+}
+
+/**
+ * Fetch /sitemap.xml from the base origin with plain fetch: no browser, no
+ * cookies, no session. A missing or unreadable sitemap seeds nothing.
+ */
+export async function fetchSitemap(base: string, ignore: readonly string[], fetchImpl: typeof fetch = fetch): Promise<string[]> {
+  try {
+    const response = await fetchImpl(new URL("/sitemap.xml", base).href, { redirect: "follow" });
+    return response.ok ? parseSitemap(await response.text(), base, ignore) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** How the crawl knew it was logged in: a configured marker, the redirect heuristic, or not at all. */
+export type SessionMode = "checked" | "heuristic" | "none";
+
+export function sessionMode(loggedIn: { role: string; name: string } | undefined, hasSession: boolean): SessionMode {
+  if (loggedIn) return "checked";
+  return hasSession ? "heuristic" : "none";
+}
+
+/**
+ * Judge the first page. With a `logged_in` marker, the page must show it; with
+ * only a storage state, a first page that landed on an auth route other than the
+ * base route means the app bounced the crawl to its login page. Returns the
+ * failure message, or undefined when the session looks good. The messages name
+ * the page, never the session file.
+ */
+export function sessionFailure(
+  first: PageSnapshot,
+  opts: { baseUrl: string; loggedIn?: { role: string; name: string }; hasSession: boolean },
+): string | undefined {
+  const advice = "The saved session is missing or expired; log in again and re-save it.";
+  const mode = sessionMode(opts.loggedIn, opts.hasSession);
+  if (mode === "checked" && opts.loggedIn) {
+    const want = targetKey(opts.loggedIn.role, opts.loggedIn.name);
+    if (first.elements.some((e) => targetKey(e.role, e.name) === want)) return undefined;
+    return `explore: session check failed: the first page does not show ${opts.loggedIn.role} "${opts.loggedIn.name}". ${advice}`;
+  }
+  if (mode !== "heuristic") return undefined;
+  const landed = normalizeRoute(first.url, opts.baseUrl);
+  if (AUTH.test(landed) && landed !== normalizeRoute(opts.baseUrl, opts.baseUrl)) {
+    return `explore: session check failed: the first page redirected to ${landed}, which looks like a login page. ${advice}`;
+  }
+  return undefined;
 }
 
 /**
@@ -157,6 +244,11 @@ export interface SpecCoverage {
   addressesElement(element: FlowElement): boolean;
 }
 
+/** A seeded flow says so in the report; the reason carries no weight of its own. */
+function withSeeded(rank: { value: number; reasons: string[] }, seeded: boolean): { value: number; reasons: string[] } {
+  return seeded ? { ...rank, reasons: [...rank.reasons, "seeded"] } : rank;
+}
+
 /** Crawled pages into ranked flows, with coverage from the specs that exist. */
 export function buildFlows(pages: readonly PageSnapshot[], baseUrl: string, specs: SpecCoverage, allowMutations: readonly string[]): Flow[] {
   const entry = normalizeRoute(baseUrl, baseUrl);
@@ -170,7 +262,7 @@ export function buildFlows(pages: readonly PageSnapshot[], baseUrl: string, spec
       url: page.url,
       title: page.title,
       elements: page.elements,
-      ...rankFlow(route, page.elements, route === entry),
+      ...withSeeded(rankFlow(route, page.elements, route === entry), page.seeded === true),
       coveredBy,
       uncovered,
       targets: uncovered.filter((e) => writable || !e.mutating),
@@ -190,11 +282,14 @@ export function blockedReason(flow: Flow): string {
 }
 
 /** The dry-run report: the flow map, covered against uncovered, and what blocks each. */
-export function renderReport(flows: readonly Flow[], opts: { baseUrl: string; pages: number; maxPages: number }): string {
+export function renderReport(
+  flows: readonly Flow[],
+  opts: { baseUrl: string; pages: number; maxPages: number; session?: SessionMode },
+): string {
   const covered = flows.filter((f) => f.covered).length;
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const lines = [
-    `explore ${opts.baseUrl}: ${plural(opts.pages, "route")} crawled (max ${opts.maxPages}), ${covered} covered, ${flows.length - covered} uncovered`,
+    `explore ${opts.baseUrl}: ${plural(opts.pages, "route")} crawled (max ${opts.maxPages}), ${covered} covered, ${flows.length - covered} uncovered${opts.session ? `, session: ${opts.session}` : ""}`,
     "",
     ["value".padStart(7), "cov", "route".padEnd(34), "els", "why"].join("  "),
   ];

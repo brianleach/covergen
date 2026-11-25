@@ -125,6 +125,12 @@ const RepoSchema = z.object({
       ignore_patterns: z.array(z.string().min(1)).default(["/logout", "/logout/**", "/signout", "/sign-out"]),
       /** Where the end to end specs that already exist live, relative to cwd. */
       spec_glob: z.string().min(1).default("e2e/**/*.spec.ts"),
+      /** Routes to queue right after the base URL, for what a client-side router reaches without a link. */
+      seed_routes: z.array(z.string().min(1)).default([]),
+      /** Also seed the in-scope entries of /sitemap.xml, fetched with no session. */
+      sitemap: z.boolean().default(false),
+      /** An element only a logged-in page shows. The first page must show it, or the crawl stops. */
+      logged_in: z.object({ role: z.string().min(1), name: z.string().min(1) }).optional(),
     })
     .optional(),
   /** Accept candidates the mutation spot-check found nothing to mutate on. */
@@ -387,6 +393,9 @@ export function loadConfig(path: string): Config {
             maxPages: r.explore.max_pages,
             ignorePatterns: r.explore.ignore_patterns,
             specGlob: r.explore.spec_glob,
+            seedRoutes: r.explore.seed_routes,
+            sitemap: r.explore.sitemap,
+            loggedIn: r.explore.logged_in,
           }
         : undefined,
     };

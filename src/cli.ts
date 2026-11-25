@@ -18,7 +18,7 @@ import { auditMarkdown, runAudit, writeAudit, writeAuditJson } from "./audit.js"
 import { claudeExec, preflightClaudeCode } from "./claude-code.js";
 import { compareReport, gitTreeState, runComparison } from "./compare.js";
 import { findRepo, generatorBackend, loadConfig, stateDirFor, type Config } from "./config.js";
-import { buildFlows, crawl, exploreEnv, renderReport } from "./explore.js";
+import { buildFlows, crawl, exploreEnv, fetchSitemap, renderReport, sessionFailure, sessionMode } from "./explore.js";
 import { openBrowserReader } from "./explore-browser.js";
 import { indexSpecs, loadSpecs } from "./explore-specs.js";
 import { matchesSources } from "./git.js";
@@ -324,13 +324,40 @@ export function buildProgram(): Command {
       if (maxPages < 1) throw new Error("--max-pages must be at least 1. There is no unlimited crawl.");
       // Logged as a boolean, never as a path: the session file is the credential.
       log.info({ repo: repo.name, baseUrl, session: storageStatePath !== undefined, maxPages }, "explore dry run");
-      const specs = indexSpecs(await loadSpecs(repo.cwd, repo.explore.specGlob), baseUrl);
-      const reader = await openBrowserReader({ storageStatePath });
+      const explore = repo.explore;
+      const specs = indexSpecs(await loadSpecs(repo.cwd, explore.specGlob), baseUrl);
+      const sitemap = explore.sitemap ? await fetchSitemap(baseUrl, explore.ignorePatterns) : [];
+      const names = { corrected: 0, appended: 0 };
+      const reader = await openBrowserReader({
+        storageStatePath,
+        onNames: (counts) => {
+          names.corrected += counts.corrected;
+          names.appended += counts.appended;
+        },
+      });
+      const session = sessionMode(explore.loggedIn, storageStatePath !== undefined);
+      let failure: string | undefined;
       try {
-        const pages = await crawl(reader, { baseUrl, maxPages, ignore: repo.explore.ignorePatterns });
-        const flows = buildFlows(pages, baseUrl, specs, repo.explore.allowMutations);
-        process.stdout.write(renderReport(flows, { baseUrl, pages: pages.length, maxPages }));
+        const pages = await crawl(reader, {
+          baseUrl,
+          maxPages,
+          ignore: explore.ignorePatterns,
+          seeds: [...explore.seedRoutes, ...sitemap],
+          verify: (first) => {
+            failure = sessionFailure(first, { baseUrl, loggedIn: explore.loggedIn, hasSession: storageStatePath !== undefined });
+            // Stop before a second page is read: every one would be the login page.
+            if (failure) throw new Error(failure);
+          },
+        });
+        // Counts only: a corrected name is page content, and the log is not the report.
+        log.info({ ...names, seeds: explore.seedRoutes.length, sitemap: sitemap.length }, "explore names and seeds");
+        const flows = buildFlows(pages, baseUrl, specs, explore.allowMutations);
+        process.stdout.write(renderReport(flows, { baseUrl, pages: pages.length, maxPages, session }));
         process.exitCode = flows.some((f) => !f.covered) ? EXIT_OK : EXIT_NONE_ACCEPTED;
+      } catch (err) {
+        if (failure === undefined) throw err;
+        process.stderr.write(`${failure}\n`);
+        process.exitCode = EXIT_ERROR;
       } finally {
         await reader.close();
       }
