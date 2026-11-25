@@ -88,6 +88,8 @@ export interface ExploreOptions {
   sitemap: boolean;
   /** An element only a logged-in page shows, checked on the first page. */
   loggedIn?: { role: string; name: string };
+  /** Idiom pack for generated end to end specs. Absent means the bundled playwright pack. */
+  idiomPackPath?: string;
 }
 
 export interface RepoConfig {
@@ -345,6 +347,45 @@ export interface Candidate {
   history: PromptMessage[];
   /** System blocks used at generation time, re-sent on repair so the cache prefix matches. */
   system?: Pick<PromptBlocks, "stable" | "semiStable">;
+}
+
+/**
+ * Where one generated end to end spec stands. Declared whole now so the explore
+ * gate's verdicts land without reshaping it; the seven rejections after
+ * test_failed are the ids in src/explore-rules.ts.
+ */
+export type FlowStatus =
+  | "generated"
+  | "build_failed"
+  | "test_failed"
+  | "flaky"
+  | "no_assertion"
+  | "action_removable"
+  | "mutation_not_allowed"
+  | "credential_in_spec"
+  | "off_site"
+  | "duplicate_flow"
+  | "accepted"
+  | "frozen";
+
+/** One candidate end to end spec for one crawled flow. The flow analogue of Candidate. */
+export interface FlowCandidate {
+  id: string;
+  /** Normalized hash of the spec text, used for dedup. */
+  hash: string;
+  /** The flow's route, e.g. /settings/profile. */
+  route: string;
+  /** Spec file this candidate would be written to, relative to cwd. */
+  specPath: string;
+  /** The complete spec file. Empty when the reply held no single fenced block. */
+  code: string;
+  status: FlowStatus;
+  attempts: number;
+  lastError?: string;
+  /** Message history, so a repair round continues the same chat. */
+  history: PromptMessage[];
+  /** System blocks used at generation time, re-sent on repair so the cache prefix matches. */
+  system: Pick<PromptBlocks, "stable" | "semiStable">;
 }
 
 export interface PromptMessage {

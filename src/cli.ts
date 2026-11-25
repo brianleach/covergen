@@ -20,6 +20,7 @@ import { compareReport, gitTreeState, runComparison } from "./compare.js";
 import { findRepo, generatorBackend, loadConfig, stateDirFor, type Config } from "./config.js";
 import { buildFlows, crawl, exploreEnv, fetchSitemap, renderReport, sessionFailure, sessionMode } from "./explore.js";
 import { openBrowserReader } from "./explore-browser.js";
+import { showFlowPrompt } from "./explore-prompt.js";
 import { indexSpecs, loadSpecs } from "./explore-specs.js";
 import { matchesSources } from "./git.js";
 import { readJournal } from "./journal.js";
@@ -315,7 +316,8 @@ export function buildProgram(): Command {
     .requiredOption("--repo <name>", "repo name from covergen.yaml, with an explore: block")
     .requiredOption("--dry-run", "report only. The only mode explore has today; generation is not built")
     .option("--max-pages <n>", "override explore.max_pages for this crawl")
-    .action(async (opts: { repo: string; maxPages?: string }) => {
+    .option("--show-prompt", "after the report, print the prompt blocks for the top-ranked open flow. Constructs no generator", false)
+    .action(async (opts: { repo: string; maxPages?: string; showPrompt?: boolean }) => {
       const { config, log } = context(program);
       const repo = findRepo(config, opts.repo);
       if (!repo.explore) throw new Error(`repo "${repo.name}" has no explore: block in covergen.yaml.`);
@@ -325,7 +327,8 @@ export function buildProgram(): Command {
       // Logged as a boolean, never as a path: the session file is the credential.
       log.info({ repo: repo.name, baseUrl, session: storageStatePath !== undefined, maxPages }, "explore dry run");
       const explore = repo.explore;
-      const specs = indexSpecs(await loadSpecs(repo.cwd, explore.specGlob), baseUrl);
+      const specFiles = await loadSpecs(repo.cwd, explore.specGlob);
+      const specs = indexSpecs(specFiles, baseUrl);
       const sitemap = explore.sitemap ? await fetchSitemap(baseUrl, explore.ignorePatterns) : [];
       const names = { corrected: 0, appended: 0 };
       const reader = await openBrowserReader({
@@ -353,6 +356,10 @@ export function buildProgram(): Command {
         log.info({ ...names, seeds: explore.seedRoutes.length, sitemap: sitemap.length }, "explore names and seeds");
         const flows = buildFlows(pages, baseUrl, specs, explore.allowMutations);
         process.stdout.write(renderReport(flows, { baseUrl, pages: pages.length, maxPages, session }));
+        if (opts.showPrompt) {
+          const exists = (path: string) => existsSync(join(repo.cwd, path));
+          process.stdout.write(`\n${showFlowPrompt({ flows, specs: specFiles, explore, baseUrl, exists })}`);
+        }
         process.exitCode = flows.some((f) => !f.covered) ? EXIT_OK : EXIT_NONE_ACCEPTED;
       } catch (err) {
         if (failure === undefined) throw err;
