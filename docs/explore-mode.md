@@ -84,10 +84,15 @@ repos:
       max_pages: 25
       ignore_patterns: ["/logout", "/admin/**"]
       spec_glob: "e2e/**/*.spec.ts"                 # the specs that already exist
+      seed_routes: ["/reports", "/settings/team"]   # default [], routes no link reaches
+      sitemap: true                                 # default false, also seed /sitemap.xml
+      logged_in: { role: button, name: "Account menu" }  # optional, only a logged-in page shows it
 ```
 
 `spec_glob` is the one key beyond the five the design started with: the coverage
-half has to know where the existing specs live.
+half has to know where the existing specs live. The last three make the flow map
+trustworthy: `seed_routes` and `sitemap` reach client-side routes, and `logged_in`
+proves the session worked before anything is ranked.
 
 ## The gate stays a gate
 
@@ -120,16 +125,17 @@ action-removal results beside each.
 covergen explore --repo <name> --dry-run
 ```
 
-Logs in with the storage state, crawls up to `max_pages` internal links read-only,
-records routes and interactive elements, matches them against the `page.goto` and
+Logs in with the storage state, checks the first page is a logged-in page, crawls
+up to `max_pages` internal links and seeded routes read-only, records routes and
+interactive elements, matches them against the `page.goto` and
 `getByRole` targets in the repo's existing specs, and prints the uncovered-flow
 report. It generates nothing and writes nothing.
 
 | File | Responsibility |
 | --- | --- |
 | `src/explore.ts` | Flow model, route normalization, scope and ignore matching, crawl, ranking, report |
-| `src/explore-html.ts` | HTML to snapshot (title, links, role and name elements) plus a static HTTP reader |
-| `src/explore-browser.ts` | Chromium reader: storage state in, `page.content()` out, into the same parser |
+| `src/explore-html.ts` | HTML to snapshot (title, links, role and accessible-name elements), the aria snapshot parser and merge, plus a static HTTP reader |
+| `src/explore-browser.ts` | Chromium reader: storage state in, `page.content()` into the same parser, names corrected by one aria snapshot per page |
 | `src/explore-specs.ts` | Scan existing specs for `page.goto` and `getByRole` targets, index them |
 
 `playwright-core` is a dependency; browsers are not bundled. The reader finds one
@@ -140,18 +146,30 @@ server with no browser at all, which is what keeps CI green.
 
 ## Known limits
 
-- **Names are approximated, not computed.** The parser reads `aria-label`, text,
-  placeholder and value; the accessibility tree resolves `<label for>` and
-  `aria-labelledby` properly. Playwright's role locators are the fix, at a round
-  trip per element.
+- **Names come from two places.** The parser follows the accessible-name order
+  (`aria-labelledby`, `aria-label`, an associated `<label>`, own text including an
+  image's `alt`, then `title`, `placeholder`, `value`), which is what a static page
+  can say. The browser reader then takes one aria snapshot per page and lets the
+  accessibility tree's name win where the two disagree; elements only the tree
+  lists (shadow DOM, custom elements) are added and treated as writes unless they
+  are plain links. Still approximate: the parser pairs elements with the tree by
+  role and order, so a page whose DOM order differs from its tree order can pair
+  the wrong two, and CSS-generated text and `aria-hidden` subtrees are only right
+  through the browser reader.
 - **Client-side routing produces no links.** A router that pushes state from a
-  click leaves nothing in the DOM to follow, so the crawl sees only what `<a href>`
-  reaches. A sitemap or an exported route table is the way in.
+  click leaves nothing in the DOM to follow. `seed_routes` and `sitemap: true`
+  queue those routes right after the base URL, still under `max_pages`, the scope
+  check and the ignore patterns, and the report marks such a flow `seeded`. A route
+  in neither, reachable only by clicking, is still invisible.
 - **`mutating` is conservative.** A logout link in the nav marks every page as
   containing a write. That only excludes the element from the targets, but it does
   inflate the ranking.
-- **Session expiry looks like coverage.** An expired storage state redirects every
-  route to the login page, which crawls as one route and reports the whole app
-  uncovered. A logged-in assertion on the first page is the check to add.
+- **Session expiry is caught on the first page.** With `logged_in` set, a first
+  page without that element stops the crawl with `explore: session check failed`
+  and exit 1. Without it, a storage state whose first page lands on a login-shaped
+  route (other than the base URL itself) stops the same way. The report header
+  says which check ran: `session: checked`, `heuristic` or `none`. The heuristic
+  misses an app that shows its login form on the base URL without redirecting;
+  set `logged_in` for that.
 - **A crawl is not free and not invisible.** It hits a real server, with real
   analytics, rate limits and audit logs, as the owner.
