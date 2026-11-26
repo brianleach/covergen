@@ -87,6 +87,7 @@ repos:
       seed_routes: ["/reports", "/settings/team"]   # default [], routes no link reaches
       sitemap: true                                 # default false, also seed /sitemap.xml
       logged_in: { role: button, name: "Account menu" }  # optional, only a logged-in page shows it
+      idiom_pack: ./idioms/playwright.md            # optional, the bundled playwright pack is the default
 ```
 
 `spec_glob` is the one key beyond the five the design started with: the coverage
@@ -137,6 +138,26 @@ report. It generates nothing and writes nothing.
 | `src/explore-html.ts` | HTML to snapshot (title, links, role and accessible-name elements), the aria snapshot parser and merge, plus a static HTTP reader |
 | `src/explore-browser.ts` | Chromium reader: storage state in, `page.content()` into the same parser, names corrected by one aria snapshot per page |
 | `src/explore-specs.ts` | Scan existing specs for `page.goto` and `getByRole` targets, index them |
+| `src/explore-prompt.ts` | Prompt blocks for one flow: idiom pack, rules and format; a style spec and the flow map; the target |
+| `src/explore-rules.ts` | The seven rejections as ids with prompt-ready descriptions |
+| `src/explore-generate.ts` | One flow prompt to a `FlowCandidate` through any backend's `continueChat`, the shape check, spec paths |
+
+### Previewing a flow prompt
+
+```
+covergen explore --repo <name> --dry-run --show-prompt
+```
+
+prints, after the report, the three prompt blocks for the top-ranked flow a
+generation pass would target. No generator is constructed and nothing is sent.
+The blocks name `base_url_env` and `storage_state_env`, never their values: a
+generated spec loads its session with
+`test.use({ storageState: process.env.<storage_state_env> })` and navigates with
+relative paths. The idiom pack is `explore.idiom_pack`, else the bundled
+`idioms/playwright.md`; the repo-level `idiom_pack` belongs to the unit runner and
+is not read here. A generated spec would go to
+`<spec dir>/covergen/<route slug>.spec.ts`, where the spec dir is the literal
+head of `spec_glob`.
 
 `playwright-core` is a dependency; browsers are not bundled. The reader finds one
 through `PLAYWRIGHT_BROWSERS_PATH`, or `COVERGEN_BROWSER_PATH` names the

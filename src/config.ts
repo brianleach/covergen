@@ -12,7 +12,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { DEFAULT_PRICE_PER_MTOK, type Price } from "./cost.js";
 import { ruleIds } from "./rules.js";
-import type { GeneratorBackend, RepoConfig, RunnerName } from "./types.js";
+import type { ExploreOptions, GeneratorBackend, RepoConfig, RunnerName } from "./types.js";
 
 const runnerNames = ["rspec", "vitest", "bun", "jest", "pytest", "go", "cargo", "node-test"] as const;
 const generatorBackends = ["api", "claude-code", "openai-compatible"] as const;
@@ -44,6 +44,20 @@ export function resolveIdiomPack(configDir: string, value: string): string {
   const bundled = join(packageRoot, "idioms", basename(value));
   if (existsSync(bundled)) return bundled;
   return local;
+}
+
+/** A pack that ships with covergen, by file name. */
+export function bundledIdiomPack(name: string): string {
+  return join(packageRoot, "idioms", name);
+}
+
+/**
+ * The idiom pack explore generation reads: the repo's explore.idiom_pack when
+ * set, else the bundled playwright pack. The repo-level idiom_pack is the unit
+ * runner's and is never used here.
+ */
+export function exploreIdiomPackPath(explore: Pick<ExploreOptions, "idiomPackPath">): string {
+  return explore.idiomPackPath ?? bundledIdiomPack("playwright.md");
 }
 
 const RepoSchema = z.object({
@@ -131,6 +145,8 @@ const RepoSchema = z.object({
       sitemap: z.boolean().default(false),
       /** An element only a logged-in page shows. The first page must show it, or the crawl stops. */
       logged_in: z.object({ role: z.string().min(1), name: z.string().min(1) }).optional(),
+      /** Idiom pack for generated specs. Default is the bundled playwright pack, for explore only. */
+      idiom_pack: z.string().optional(),
     })
     .optional(),
   /** Accept candidates the mutation spot-check found nothing to mutate on. */
@@ -396,6 +412,7 @@ export function loadConfig(path: string): Config {
             seedRoutes: r.explore.seed_routes,
             sitemap: r.explore.sitemap,
             loggedIn: r.explore.logged_in,
+            ...(r.explore.idiom_pack ? { idiomPackPath: resolveIdiomPack(configDir, r.explore.idiom_pack) } : {}),
           }
         : undefined,
     };
