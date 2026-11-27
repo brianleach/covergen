@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildFlows } from "./explore.js";
 import type { Flow, PageSnapshot } from "./explore.js";
-import { evaluateFlow, scrubEnvValues } from "./explore-gate.js";
+import { evaluateFlow, REMOVED_MARKER, scrubEnvValues, withoutLines } from "./explore-gate.js";
 import type { FlowGateArgs } from "./explore-gate.js";
 import { indexSpecs } from "./explore-specs.js";
 import type { SpecFile } from "./explore-specs.js";
@@ -77,15 +77,23 @@ function candidate(code: string, specPath = "e2e/covergen/settings-profile.spec.
 const ok: ExecResult = { exitCode: 0, stdout: "1 passed", stderr: "", durationMs: 1 };
 const fail = (stderr: string): ExecResult => ({ exitCode: 1, stdout: "", stderr, durationMs: 1 });
 
-/** A fake exec that answers from a script and records each call, plus whether the spec existed at that moment. */
-function fakeExec(cwd: string, script: (n: number) => ExecResult): ExecFn & { calls: { cmd: string[]; opts: ExecOptions; existed: boolean }[] } {
-  const calls: { cmd: string[]; opts: ExecOptions; existed: boolean }[] = [];
+type Call = { cmd: string[]; opts: ExecOptions; existed: boolean; text: string };
+
+/** A fake exec that answers from a script and records each call, whether the spec existed at that moment, and its text. */
+function fakeExec(cwd: string, script: (n: number, text: string) => ExecResult): ExecFn & { calls: Call[] } {
+  const calls: Call[] = [];
   const fn = async (cmd: string[], opts: ExecOptions) => {
-    calls.push({ cmd, opts, existed: existsSync(join(cwd, cmd.at(-1) ?? "")) });
-    return script(calls.length);
+    const path = join(cwd, cmd.at(-1) ?? "");
+    const existed = existsSync(path);
+    const text = existed ? readFileSync(path, "utf8") : "";
+    calls.push({ cmd, opts, existed, text });
+    return script(calls.length, text);
   };
   return Object.assign(fn, { calls });
 }
+
+/** A target whose spec breaks when its main action is gone, as a real one would. */
+const honest = (_n: number, text: string): ExecResult => (text.includes(REMOVED_MARKER) ? fail("Error: expect(locator).toBeVisible() failed") : ok);
 
 function args(cwd: string, code: string, exec: ExecFn, extra: Partial<FlowGateArgs> = {}): FlowGateArgs {
   return {
@@ -106,13 +114,14 @@ function args(cwd: string, code: string, exec: ExecFn, extra: Partial<FlowGateAr
 const repo = () => mkdtempSync(join(tmpdir(), "covergen-explore-gate-"));
 
 describe("evaluateFlow verdicts", () => {
-  it("accepts a spec that passes k times, runs the target's command on the spec path, and leaves no file behind", async () => {
+  it("accepts a spec that passes k times and breaks without its main action, and leaves no file behind", async () => {
     const cwd = repo();
-    const exec = fakeExec(cwd, () => ok);
+    const exec = fakeExec(cwd, honest);
     const lines: string[] = [];
     const result = await evaluateFlow({ ...args(cwd, GOOD, exec), log: (l) => lines.push(l) });
     expect(result.status).toBe("accepted");
-    expect(exec.calls).toHaveLength(3);
+    expect(result.actionRemoval).toEqual({ line: 5, verb: "click", broke: true });
+    expect(exec.calls).toHaveLength(4);
     expect(exec.calls.every((c) => c.existed)).toBe(true);
     expect(exec.calls[0]?.cmd).toEqual(["npx", "playwright", "test", "e2e/covergen/settings-profile.spec.ts"]);
     expect(exec.calls[0]?.opts).toMatchObject({ cwd, timeoutMs: 5_000 });
@@ -133,9 +142,9 @@ describe("evaluateFlow verdicts", () => {
 
   it("honors k", async () => {
     const cwd = repo();
-    const exec = fakeExec(cwd, () => ok);
+    const exec = fakeExec(cwd, honest);
     await evaluateFlow(args(cwd, GOOD, exec, { explore: { ...explore, k: 5 } }));
-    expect(exec.calls).toHaveLength(5);
+    expect(exec.calls).toHaveLength(6);
   });
 
   it("calls a first-run failure test_failed and a build error build_failed", async () => {
@@ -213,6 +222,75 @@ describe("static rules refuse before any file is written", () => {
       expect(lines).toEqual([`explore gate: ${rule} rule=${rule} line=${line}`]);
     });
   }
+});
+
+describe("no_assertion refuses before any file is written", () => {
+  const refused: [string, string, number][] = [
+    ["a title-only spec", spec("/settings/profile", "await expect(page).toHaveTitle(/Profile/);"), 4],
+    ["a title after a click", spec("/settings/profile", 'await page.getByRole("button", { name: "Save changes" }).click();', "await expect(page).toHaveTitle(/Profile/);"), 5],
+    ["visibility only before the action", spec("/settings/profile", 'await expect(page.getByText("Profile")).toBeVisible();', 'await page.getByRole("button", { name: "Save changes" }).click();'), 6],
+    ["expect(true) and toBeDefined", spec("/settings/profile", 'await page.getByRole("button", { name: "Save changes" }).click();', "expect(true).toBe(true);", 'expect(page.getByText("Saved")).toBeDefined();'), 5],
+  ];
+  for (const [name, code, line] of refused) {
+    it(name, async () => {
+      const cwd = repo();
+      const exec = fakeExec(cwd, honest);
+      const result = await evaluateFlow(args(cwd, code, exec));
+      expect(result).toMatchObject({ status: "no_assertion", rule: "no_assertion", line, runs: [] });
+      expect(exec.calls).toHaveLength(0);
+      expect(readdirSync(cwd)).toEqual([]);
+    });
+  }
+
+  it("accepts a URL assertion after a click", async () => {
+    const cwd = repo();
+    const code = spec("/settings/profile", 'await page.getByRole("button", { name: "Save changes" }).click();', "await expect(page).toHaveURL(/\\/settings\\/profile\\?saved=1/);");
+    expect((await evaluateFlow(args(cwd, code, fakeExec(cwd, honest)))).status).toBe("accepted");
+  });
+});
+
+describe("action_removable", () => {
+  const CHAINED = spec(
+    "/settings/profile",
+    'await page.getByRole("textbox", { name: "Display name" }).fill("Pat");',
+    "await page",
+    '    .getByRole("button", { name: "Save changes" })',
+    "    .click();",
+    'await expect(page.getByText("Saved")).toBeVisible();',
+  );
+
+  it("refuses a spec that still passes without its main action, and comments out the whole chained statement", async () => {
+    const cwd = repo();
+    const exec = fakeExec(cwd, () => ok);
+    const result = await evaluateFlow(args(cwd, CHAINED, exec));
+    expect(result).toMatchObject({ status: "action_removable", rule: "action_removable", line: 6, verb: "click" });
+    expect(result.actionRemoval).toBeUndefined();
+    expect(exec.calls).toHaveLength(4);
+    const variant = exec.calls[3]?.text.split("\n") ?? [];
+    expect(variant.slice(5, 8).every((l) => l.trimStart().startsWith(REMOVED_MARKER))).toBe(true);
+    expect(variant[4]).not.toContain(REMOVED_MARKER);
+    expect(variant[8]).not.toContain(REMOVED_MARKER);
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it("keeps a spec that breaks without its main action and records which one", async () => {
+    const cwd = repo();
+    const result = await evaluateFlow(args(cwd, CHAINED, fakeExec(cwd, honest)));
+    expect(result.status).toBe("accepted");
+    expect(result.actionRemoval).toEqual({ line: 6, verb: "click", broke: true });
+  });
+
+  it("calls a variant that does not build inconclusive and refuses it", async () => {
+    const cwd = repo();
+    const exec = fakeExec(cwd, (_n, text) => (text.includes(REMOVED_MARKER) ? fail("SyntaxError: Unexpected token ')'") : ok));
+    const result = await evaluateFlow(args(cwd, CHAINED, exec));
+    expect(result).toMatchObject({ status: "action_removable", line: 6, verb: "click", error: "the spec without its main action did not build" });
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it("withoutLines keeps indentation and touches only the span", () => {
+    expect(withoutLines("a\n  b\n  c\nd", 2, 3)).toBe(`a\n  ${REMOVED_MARKER} b\n  ${REMOVED_MARKER} c\nd`);
+  });
 });
 
 describe("scrubEnvValues", () => {

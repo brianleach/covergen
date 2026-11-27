@@ -9,6 +9,11 @@
  * repo's own test command, and the file is deleted afterwards whatever the
  * verdict. Writing accepted specs for real is a later step.
  *
+ * After the k passes comes the action-removal check, the end to end analogue
+ * of the unit gate's mutation spot-check: the main action (the last action
+ * before the last counting assertion) is commented out, the variant is run
+ * once, and a spec that still passes protects nothing and is refused.
+ *
  * Nothing private leaks out of here: the base URL and the storage state path
  * reach the child only through the environment variables the config names, and
  * any output tail kept in `error` has both values replaced by `${NAME}`.
@@ -21,6 +26,7 @@ import { checkFlowShape } from "./explore-generate.js";
 import { exploreRules, staticRuleOrder } from "./explore-rules.js";
 import type { ExploreRuleId, RuleContext } from "./explore-rules.js";
 import type { SpecFile } from "./explore-specs.js";
+import { mainAction, scanSteps } from "./explore-steps.js";
 import { classifyFailure, tailOf } from "./gate.js";
 import { runCommand } from "./runners/exec.js";
 import type { ExecFn, ExecResult } from "./runners/exec.js";
@@ -33,6 +39,21 @@ export interface FlowGateResult {
   error?: string;
   rule?: ExploreRuleId;
   line?: number;
+  /** For action_removable: the main action's method, e.g. click. */
+  verb?: string;
+  /** Set on an accepted spec: the main action whose removal broke it, for the PR body. */
+  actionRemoval?: { line: number; verb: string; broke: true };
+}
+
+/** The marker each line of the removed action carries in the variant. */
+export const REMOVED_MARKER = "// covergen: removed for the action-removal check";
+
+/** The spec with the lines from startLine to endLine (1-based, inclusive) commented out, indentation kept. */
+export function withoutLines(code: string, startLine: number, endLine: number): string {
+  return code
+    .split("\n")
+    .map((line, i) => (i + 1 >= startLine && i + 1 <= endLine ? line.replace(/^(\s*)/, `$1${REMOVED_MARKER} `) : line))
+    .join("\n");
 }
 
 export interface FlowGateArgs {
@@ -127,7 +148,20 @@ async function judge(args: FlowGateArgs): Promise<FlowGateResult> {
       const text = tail(run);
       return { status: "flaky", runs, error: text ? `${note}\n${text}` : note };
     }
-    return { status: "accepted", runs };
+
+    const action = mainAction(scanSteps(candidate.code));
+    if (!action) return { status: "no_assertion", runs, error: "no main action to remove", rule: "no_assertion", line: 1 };
+    const found = { rule: "action_removable" as const, line: action.startLine, verb: action.verb };
+    await writeFile(absSpec, withoutLines(candidate.code, action.startLine, action.endLine), "utf8");
+    const run = await exec([...explore.testCommand, specPath], { cwd: args.cwd, timeoutMs: explore.timeoutMs, env });
+    runs.push(run);
+    if (run.exitCode === 0) {
+      return { status: "action_removable", runs, error: `the spec still passed with its main action (${action.verb}, line ${action.startLine}) commented out`, ...found };
+    }
+    if (classifyFailure(`${run.stderr}\n${run.stdout}`) === "build_failed") {
+      return { status: "action_removable", runs, error: "the spec without its main action did not build", ...found };
+    }
+    return { status: "accepted", runs, actionRemoval: { line: action.startLine, verb: action.verb, broke: true } };
   } finally {
     await unlink(absSpec).catch(() => {});
     await removeMadeDirs(dirname(absSpec), made);
