@@ -26,6 +26,30 @@ describe("specPathFromTemplate", () => {
 });
 
 describe("loadConfig", () => {
+  test("explore gate keys: defaults, spec_dir from spec_glob, and k of at least 2", () => {
+    const dir = mkdtempSync(join(tmpdir(), "covergen-"));
+    const path = join(dir, "covergen.yaml");
+    const repo = (explore: string) =>
+      `repos:\n  - name: web\n    root: ../web\n    runner: vitest\n    sources: ["src/**/*.ts"]\n    explore:\n${explore}`;
+
+    writeFileSync(path, repo("      spec_glob: tests/e2e/**/*.spec.ts\n"));
+    const defaults = findRepo(loadConfig(path), "web").explore;
+    expect(defaults).toMatchObject({ testCommand: ["npx", "playwright", "test"], specDir: "tests/e2e", k: 3, timeoutMs: 120000 });
+
+    writeFileSync(path, repo("      test_command: [pnpm, exec, playwright, test]\n      spec_dir: e2e/generated\n      k: 5\n      timeout_ms: 30000\n"));
+    expect(findRepo(loadConfig(path), "web").explore).toMatchObject({
+      testCommand: ["pnpm", "exec", "playwright", "test"],
+      specDir: "e2e/generated",
+      k: 5,
+      timeoutMs: 30000,
+    });
+
+    for (const bad of ["      k: 1\n", "      k: 2.5\n", "      timeout_ms: 0\n", "      test_command: []\n"]) {
+      writeFileSync(path, repo(bad));
+      expect(() => loadConfig(path)).toThrow();
+    }
+  });
+
   test("reads an explicit mutation block", () => {
     const dir = mkdtempSync(join(tmpdir(), "covergen-"));
     const path = join(dir, "covergen.yaml");

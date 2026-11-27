@@ -90,6 +90,14 @@ export interface ExploreOptions {
   loggedIn?: { role: string; name: string };
   /** Idiom pack for generated end to end specs. Absent means the bundled playwright pack. */
   idiomPackPath?: string;
+  /** argv that runs one spec file in the target repo, the spec path appended. */
+  testCommand: string[];
+  /** Directory, relative to cwd, generated specs are written under. */
+  specDir: string;
+  /** Passes in a row a generated spec needs before it counts as stable. */
+  k: number;
+  /** Ceiling on one run of testCommand. */
+  timeoutMs: number;
 }
 
 export interface RepoConfig {
