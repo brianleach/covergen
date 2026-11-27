@@ -12,6 +12,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { DEFAULT_PRICE_PER_MTOK, type Price } from "./cost.js";
 import { ruleIds } from "./rules.js";
+import { specDirOf } from "./explore-generate.js";
 import type { ExploreOptions, GeneratorBackend, RepoConfig, RunnerName } from "./types.js";
 
 const runnerNames = ["rspec", "vitest", "bun", "jest", "pytest", "go", "cargo", "node-test"] as const;
@@ -147,6 +148,13 @@ const RepoSchema = z.object({
       logged_in: z.object({ role: z.string().min(1), name: z.string().min(1) }).optional(),
       /** Idiom pack for generated specs. Default is the bundled playwright pack, for explore only. */
       idiom_pack: z.string().optional(),
+      /** The target repo's own Playwright, run from cwd with one spec path appended. */
+      test_command: z.array(z.string().min(1)).min(1).default(["npx", "playwright", "test"]),
+      /** Where generated specs go. Default: the literal head of spec_glob. */
+      spec_dir: z.string().min(1).optional(),
+      /** Passes in a row the end to end gate asks for. One pass proves nothing about flakiness. */
+      k: z.number().int().min(2).default(3),
+      timeout_ms: z.number().int().positive().default(120_000),
     })
     .optional(),
   /** Accept candidates the mutation spot-check found nothing to mutate on. */
@@ -413,6 +421,10 @@ export function loadConfig(path: string): Config {
             sitemap: r.explore.sitemap,
             loggedIn: r.explore.logged_in,
             ...(r.explore.idiom_pack ? { idiomPackPath: resolveIdiomPack(configDir, r.explore.idiom_pack) } : {}),
+            testCommand: r.explore.test_command,
+            specDir: r.explore.spec_dir ?? specDirOf(r.explore.spec_glob),
+            k: r.explore.k,
+            timeoutMs: r.explore.timeout_ms,
           }
         : undefined,
     };

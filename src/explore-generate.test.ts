@@ -34,6 +34,10 @@ const explore: ExploreOptions = {
   specGlob: "e2e/**/*.spec.ts",
   seedRoutes: [],
   sitemap: false,
+  testCommand: ["npx", "playwright", "test"],
+  specDir: "e2e",
+  k: 3,
+  timeoutMs: 120_000,
 };
 
 const SPECS: SpecFile[] = [

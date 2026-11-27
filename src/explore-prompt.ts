@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { exploreIdiomPackPath } from "./config.js";
 import { blockedReason } from "./explore.js";
 import type { Flow, FlowElement } from "./explore.js";
-import { flowSpecPath, specDirOf } from "./explore-generate.js";
+import { flowSpecPath } from "./explore-generate.js";
 import { exploreRulesText } from "./explore-rules.js";
 import { scanSpec } from "./explore-specs.js";
 import type { SpecFile } from "./explore-specs.js";
@@ -127,14 +127,14 @@ export function renderFlowPrompt(blocks: PromptBlocks, flow: Flow): string {
 export function showFlowPrompt(args: {
   flows: readonly Flow[];
   specs: readonly SpecFile[];
-  explore: Pick<ExploreOptions, "storageStateEnv" | "baseUrlEnv" | "specGlob" | "idiomPackPath">;
+  explore: Pick<ExploreOptions, "storageStateEnv" | "baseUrlEnv" | "specDir" | "idiomPackPath">;
   baseUrl: string;
   exists: (path: string) => boolean;
   idiomPack?: string;
 }): string {
   const flow = args.flows.find((f) => blockedReason(f) === "");
   if (!flow) return "--- no open flow, so there is no prompt to preview ---\n";
-  const specPath = flowSpecPath(flow.route, specDirOf(args.explore.specGlob), args.exists);
+  const specPath = flowSpecPath(flow.route, args.explore.specDir, args.exists);
   const blocks = buildFlowPromptBlocks({
     flow,
     flows: args.flows,

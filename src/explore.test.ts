@@ -251,7 +251,7 @@ describe("the session check", () => {
 
   it("catches the bounce to a login page when no marker is configured", async () => {
     const { storageStatePath } = exploreEnv(
-      { baseUrlEnv: "X_BASE", storageStateEnv: "X_STATE", allowMutations: [], maxPages: 5, ignorePatterns: [], specGlob: "", seedRoutes: [], sitemap: false },
+      { baseUrlEnv: "X_BASE", storageStateEnv: "X_STATE", allowMutations: [], maxPages: 5, ignorePatterns: [], specGlob: "", seedRoutes: [], sitemap: false, testCommand: [], specDir: "e2e", k: 3, timeoutMs: 1 },
       { X_BASE: `${base}app`, X_STATE: SENTINEL },
     );
     const read: string[] = [];
@@ -304,6 +304,10 @@ describe("exploreEnv", () => {
     specGlob: "e2e/**/*.spec.ts",
     seedRoutes: [],
     sitemap: false,
+    testCommand: ["npx", "playwright", "test"],
+    specDir: "e2e",
+    k: 3,
+    timeoutMs: 120_000,
   };
 
   it("reads both from the environment and treats a missing session as legal", () => {
