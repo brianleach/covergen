@@ -114,18 +114,41 @@ name the report prints:
 a generated end to end spec that navigates and asserts the title passes forever
 and protects nothing.
 
-Built so far (`evaluateFlow` in `src/explore-gate.ts`): the shape check, then the
-four static rules, `credential_in_spec`, `off_site`, `mutation_not_allowed` and
-`duplicate_flow`, which refuse a spec before any file is written, then `flaky`.
+All seven are built (`evaluateFlow` in `src/explore-gate.ts`). The shape check
+comes first, then five static rules, `credential_in_spec`, `off_site`,
+`mutation_not_allowed`, `duplicate_flow` and `no_assertion`, which refuse a spec
+before any file is written, then `flaky`, then `action_removable`.
+
 A spec that passes the static rules is written as a new file under `spec_dir`
 (an existing path is refused, never overwritten), run `k` times through
 `test_command` with the spec path appended, and deleted afterwards whatever the
 verdict. A first-run failure is `build_failed` or `test_failed`, a later one is
-`flaky` with the run number, and all passes read `accepted` until
-`no_assertion` and `action_removable` land. The child gets the base URL and the
-storage state path under their configured variable names, and any output tail
-kept for the report has both values replaced by `${NAME}`. Violation messages
-name the shape found, never the matched text.
+`flaky` with the run number. The child gets the base URL and the storage state
+path under their configured variable names, and any output tail kept for the
+report has both values replaced by `${NAME}`. Violation messages name the shape
+found, never the matched text.
+
+Both assertion rules read the spec as a list of statements
+(`scanSteps` in `src/explore-steps.ts`), each an action (`click`, `dblclick`,
+`fill`, `type`, `press`, `check`, `uncheck`, `selectOption`, `setInputFiles`,
+`tap`, `dragTo`, or any `page.goto` after the first), an assertion (an `expect`,
+or a `waitForResponse` whose response is asserted on), the first navigation, or
+other. An assertion counts when it comes after the first action and a
+regression could break it: `toHaveURL`, `toBeVisible`, `toBeHidden`,
+`toHaveText`, `toContainText`, `toHaveValue`, `toHaveCount`, `toBeChecked`,
+`toHaveAttribute`, or an `expect` on a response's status or JSON. A title,
+`expect(true)`, `toBeDefined` on a locator, and anything asserted before the
+first action only prove the page loaded. `no_assertion` refuses a spec with no
+counting assertion.
+
+The main action is the last action before the last counting assertion: the
+step whose effect the spec's final real check is about. After the `k` passes
+its whole statement, every line of a multi-line chain, is commented out with
+`// covergen: removed for the action-removal check`, that variant is written
+over the spec and run once. If it still passes, the spec is `action_removable`;
+if it fails, the spec is kept and the result records the removed action's line
+and verb for the PR body. A variant that does not build proves nothing either
+way, so it is refused as `action_removable` too. The check is always on.
 
 The gate's config keys, under `explore:`:
 

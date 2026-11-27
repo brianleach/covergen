@@ -12,6 +12,7 @@ import type { Flow, FlowElement } from "./explore.js";
 import { DESTRUCTIVE } from "./explore-html.js";
 import { indexSpecs, scanSpec, targetKey } from "./explore-specs.js";
 import type { SpecFile } from "./explore-specs.js";
+import { countingAssertions, scanSteps } from "./explore-steps.js";
 import type { FlowStatus } from "./types.js";
 
 export type ExploreRuleId = Extract<
@@ -49,7 +50,11 @@ export interface ExploreRule {
 
 export const exploreRules: readonly ExploreRule[] = [
   { id: "flaky", description: "The spec must pass three times in a row against the live target, so wait on web-first assertions, never on timers." },
-  { id: "no_assertion", description: "Assert something a regression could break: a visible state change, a network response, or a URL change." },
+  {
+    id: "no_assertion",
+    description: "Assert something a regression could break: a visible state change, a network response, or a URL change.",
+    test: (code) => noAssertionViolation(code),
+  },
   { id: "action_removable", description: "With its main action commented out the spec must fail, so assert the effect of that action, not that the page loaded." },
   {
     id: "mutation_not_allowed",
@@ -77,7 +82,7 @@ export function exploreRulesText(): string {
 }
 
 /** The order the gate runs the static rules in: the credential check first, since it guards what may be written at all. */
-export const staticRuleOrder: readonly ExploreRuleId[] = ["credential_in_spec", "off_site", "mutation_not_allowed", "duplicate_flow"];
+export const staticRuleOrder: readonly ExploreRuleId[] = ["credential_in_spec", "off_site", "mutation_not_allowed", "duplicate_flow", "no_assertion"];
 
 /** One string literal of a spec: its value (template interpolations kept raw) and where it starts. */
 interface Literal {
@@ -295,4 +300,24 @@ export function duplicateViolation(code: string, ctx: Pick<RuleContext, "baseUrl
   }
   const first = code.search(/\bgoto\s*\(/);
   return { rule: "duplicate_flow", message: "every route and target in the spec is already covered by an existing spec", line: lineAt(code, Math.max(first, 0)) };
+}
+
+/**
+ * no_assertion: no assertion after the first action is one a regression could
+ * break. A title, `expect(true)`, `toBeDefined` on a locator, and anything
+ * asserted before the first action only prove the page loaded.
+ */
+export function noAssertionViolation(code: string): RuleViolation | undefined {
+  const steps = scanSteps(code);
+  const action = steps.find((s) => s.kind === "action");
+  if (!action) {
+    const at = steps.find((s) => s.kind === "navigation") ?? steps[0];
+    return { rule: "no_assertion", message: "the spec takes no action, so nothing it asserts can catch a regression", line: at?.startLine ?? 1 };
+  }
+  if (countingAssertions(steps).length > 0) return undefined;
+  return {
+    rule: "no_assertion",
+    message: "no assertion after the first action checks a URL, visibility, text, value, count, checked state, attribute, or a response's status or JSON",
+    line: action.startLine,
+  };
 }
