@@ -3,7 +3,7 @@
  * Each id is a FlowStatus and a row of the table in docs/explore-mode.md ("The
  * gate stays a gate"). The registry feeds the stable prompt block, so the model
  * is told up front what will reject its spec, and the four static rules carry
- * their own `test`, which the end to end gate runs before any file is written.
+ * their own `test`, which src/explore-gate.ts runs before any file is written.
  * A violation message names the shape that was found and never the text that
  * matched it, so a credential the model wrote is not repeated into a log.
  */

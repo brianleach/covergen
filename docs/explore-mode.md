@@ -97,8 +97,8 @@ proves the session worked before anything is ranked.
 
 ## The gate stays a gate
 
-Generation is not built. When it is, a candidate spec is accepted only when all of
-these hold, and each failure has a name the report prints:
+A candidate spec is accepted only when all of these hold, and each failure has a
+name the report prints:
 
 | Rejection | Meaning |
 | --- | --- |
@@ -113,6 +113,28 @@ these hold, and each failure has a name the report prints:
 `action_removable` is the load-bearing one and the reason this is worth building:
 a generated end to end spec that navigates and asserts the title passes forever
 and protects nothing.
+
+Built so far (`evaluateFlow` in `src/explore-gate.ts`): the shape check, then the
+four static rules, `credential_in_spec`, `off_site`, `mutation_not_allowed` and
+`duplicate_flow`, which refuse a spec before any file is written, then `flaky`.
+A spec that passes the static rules is written as a new file under `spec_dir`
+(an existing path is refused, never overwritten), run `k` times through
+`test_command` with the spec path appended, and deleted afterwards whatever the
+verdict. A first-run failure is `build_failed` or `test_failed`, a later one is
+`flaky` with the run number, and all passes read `accepted` until
+`no_assertion` and `action_removable` land. The child gets the base URL and the
+storage state path under their configured variable names, and any output tail
+kept for the report has both values replaced by `${NAME}`. Violation messages
+name the shape found, never the matched text.
+
+The gate's config keys, under `explore:`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `test_command` | `["npx", "playwright", "test"]` | The target repo's own Playwright, run from `cwd` with one spec path appended. |
+| `spec_dir` | the literal head of `spec_glob` | Where generated specs are written: `e2e/**/*.spec.ts` gives `e2e`. |
+| `k` | `3`, minimum `2` | Passes in a row before a spec counts as stable. |
+| `timeout_ms` | `120000` | Ceiling on one run of `test_command`. |
 
 ## What the PR body shows
 
