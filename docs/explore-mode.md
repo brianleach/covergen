@@ -150,6 +150,12 @@ if it fails, the spec is kept and the result records the removed action's line
 and verb for the PR body. A variant that does not build proves nothing either
 way, so it is refused as `action_removable` too. The check is always on.
 
+A refused spec is not thrown away: it goes through the unit pipeline's
+`repairLoop` (`src/repair.ts`) with `exploreRepairMessage`, which tells the
+model what the gate found in the same chat, and the same `max_repair_rounds`.
+`flaky` gets one round, `no_assertion` and `action_removable` share one, and a
+repaired spec passes every check again from the top.
+
 The gate's config keys, under `explore:`:
 
 | Key | Default | Meaning |

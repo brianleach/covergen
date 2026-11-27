@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import type { Flow, PageSnapshot } from "./explore.js";
 import { evaluateFlow, REMOVED_MARKER, scrubEnvValues, withoutLines } from "./explore-gate.js";
 import type { FlowGateArgs } from "./explore-gate.js";
 import { indexSpecs } from "./explore-specs.js";
+import { EXPLORE_SHARED_ROUNDS, exploreRepairMessage, repairLoop } from "./repair.js";
 import type { SpecFile } from "./explore-specs.js";
 import type { ExecFn, ExecOptions, ExecResult } from "./runners/exec.js";
 import type { ExploreOptions, FlowCandidate } from "./types.js";
@@ -290,6 +291,109 @@ describe("action_removable", () => {
 
   it("withoutLines keeps indentation and touches only the span", () => {
     expect(withoutLines("a\n  b\n  c\nd", 2, 3)).toBe(`a\n  ${REMOVED_MARKER} b\n  ${REMOVED_MARKER} c\nd`);
+  });
+});
+
+describe("explore repair through the shared repair loop", () => {
+  const TITLE_ONLY = spec("/settings/profile", "await expect(page).toHaveTitle(/Profile/);");
+  const STILL_TITLE = spec("/settings/profile", 'await page.getByRole("button", { name: "Save changes" }).click();', "await expect(page).toHaveTitle(/Profile/);");
+  const ctx = { baseUrl: BASE, storageStateEnv: explore.storageStateEnv, flow: flowAt("/settings/profile"), flows, existing: EXISTING, acceptedThisRun: [] };
+
+  async function repair(replies: string[]) {
+    const cwd = repo();
+    const exec = fakeExec(cwd, honest);
+    const gate = (c: FlowCandidate) => evaluateFlow({ ...args(cwd, c.code, exec), candidate: c });
+    const first = candidate(TITLE_ONLY);
+    let n = 0;
+    const continueChat = vi.fn(async (_history: unknown, _message: string) => `\`\`\`ts\n${replies[Math.min(n++, replies.length - 1)]}\n\`\`\``);
+    const outcome = await repairLoop({
+      candidate: first,
+      gateResult: await gate(first),
+      generator: { continueChat },
+      evaluate: gate,
+      maxRounds: 3,
+      message: (c, r) => exploreRepairMessage(c, r, ctx),
+      sharedRounds: EXPLORE_SHARED_ROUNDS,
+      accepted: (c) => ({ ...c, status: "accepted" as const }),
+    });
+    return { outcome, continueChat, cwd };
+  }
+
+  it("fixes a title-only spec on round one, and the repaired spec passes every check from the top", async () => {
+    const { outcome, continueChat, cwd } = await repair([GOOD]);
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(continueChat.mock.calls[0]?.[1]).toMatch(/asserts nothing a regression could break at line 4/);
+    expect(outcome.result).toMatchObject({ status: "accepted", actionRemoval: { verb: "click", broke: true } });
+    expect(outcome.candidate).toMatchObject({ status: "accepted", code: GOOD, attempts: 2 });
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it("freezes a spec that never asserts anything after one shared round", async () => {
+    const { outcome, continueChat } = await repair([STILL_TITLE]);
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(outcome.result.status).toBe("no_assertion");
+    expect(outcome.candidate.status).toBe("frozen");
+  });
+
+  it("gives no_assertion and action_removable one round between them", async () => {
+    const passesAnyway = spec("/settings/profile", 'await page.getByRole("button", { name: "Save changes" }).click();', 'await expect(page.getByText("Profile")).toBeVisible();');
+    const cwd = repo();
+    const exec = fakeExec(cwd, () => ok);
+    const gate = (c: FlowCandidate) => evaluateFlow({ ...args(cwd, c.code, exec), candidate: c });
+    const continueChat = vi.fn(async () => `\`\`\`ts\n${passesAnyway}\n\`\`\``);
+    const first = candidate(TITLE_ONLY);
+    const outcome = await repairLoop({
+      candidate: first,
+      gateResult: await gate(first),
+      generator: { continueChat },
+      evaluate: gate,
+      maxRounds: 3,
+      message: (c, r) => exploreRepairMessage(c, r, ctx),
+      sharedRounds: EXPLORE_SHARED_ROUNDS,
+    });
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(outcome.result.status).toBe("action_removable");
+    expect(outcome.candidate.status).toBe("frozen");
+  });
+});
+
+describe("exploreRepairMessage", () => {
+  const ctx = { baseUrl: BASE, storageStateEnv: explore.storageStateEnv, flow: flowAt("/settings/profile"), flows, existing: EXISTING, acceptedThisRun: [] };
+  const msg = (status: FlowCandidate["status"], extra: Record<string, unknown> = {}, code = GOOD, flow = flowAt("/settings/profile")) =>
+    exploreRepairMessage(candidate(code), { status, runs: [], ...extra }, { ...ctx, flow });
+
+  it("names a credential rule and line, never the literal, and points at the storage state env", () => {
+    const text = msg("credential_in_spec", { line: 5, error: "the spec holds an email-shaped string literal" }, spec("/settings/profile", 'await page.getByLabel("Email").fill("someone@example.test");'));
+    expect(text).toContain("credential_in_spec at line 5");
+    expect(text).toContain("process.env.APP_STORAGE_STATE");
+    expect(text).not.toContain("someone@example.test");
+  });
+
+  it("asks for relative paths on off_site", () => {
+    expect(msg("off_site", { line: 5 })).toMatch(/relative paths only/);
+  });
+
+  it("lists the off-limits elements and whether the route is writable on mutation_not_allowed", () => {
+    const text = msg("mutation_not_allowed", { line: 5 }, spec("/billing", 'await page.getByRole("button", { name: "Update card" }).click();'), flowAt("/billing"));
+    expect(text).toContain("/billing is read-only");
+    expect(text).toContain('- button "Update card" on /billing');
+  });
+
+  it("names the targets already addressed and the ones still open on duplicate_flow", () => {
+    const text = msg("duplicate_flow", {}, spec("/billing"), flowAt("/billing"));
+    expect(text).toContain("Cover one of the targets still open");
+    expect(text).toContain('- link "Invoices"');
+  });
+
+  it("names the removed statement on action_removable, and tells a build failure apart", () => {
+    expect(msg("action_removable", { line: 5, verb: "click", error: "the spec still passed" })).toContain("the click on line 5, commented out, the spec still passed");
+    expect(msg("action_removable", { line: 5, verb: "click", error: "the spec without its main action did not build" })).toContain("did not build");
+  });
+
+  it("asks for web-first assertions on flaky and quotes the scrubbed tail on build and test failures", () => {
+    expect(msg("flaky", { error: "Timed out" })).toMatch(/web-first assertions[\s\S]*instead of timers/);
+    expect(msg("build_failed", { error: "SyntaxError at ${APP_BASE_URL}" })).toContain("SyntaxError at ${APP_BASE_URL}");
+    expect(msg("test_failed", { error: "expect failed" })).toContain("expect failed");
   });
 });
 
